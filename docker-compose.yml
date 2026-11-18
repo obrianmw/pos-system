@@ -1,0 +1,60 @@
+# Production-style stack. Database credentials come from ./.env (copy .env.example) and are separate from
+# every till/back-office login:
+#   DB_OWNER_*  builds the tables (the one-off "migrate" service) and is for database administrators only
+#   DB_APP_*    what the running app uses: read/write rows, cannot change the schema or create roles
+# The database port is published only on DB_ADMIN_BIND (default: this machine). Set it to the server's
+# admin-network address to let DBAs connect from that network; nothing else should reach port 5432.
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${DB_NAME:-pos}
+      POSTGRES_USER: ${DB_OWNER_USER:-pos_owner}
+      POSTGRES_PASSWORD: ${DB_OWNER_PASSWORD:?Set DB_OWNER_PASSWORD in .env}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      DB_APP_USER: ${DB_APP_USER:-pos_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?Set DB_APP_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    ports: ["${DB_ADMIN_BIND:-127.0.0.1}:5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+  redis:
+    image: redis:7
+  migrate:  # one-off: applies migrations with the owner role, then exits
+    build: ./backend
+    command: python manage.py migrate --noinput
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgres://${DB_OWNER_USER:-pos_owner}:${DB_OWNER_PASSWORD:?Set DB_OWNER_PASSWORD in .env}@db:5432/${DB_NAME:-pos}
+      DB_OWNER_USER: ${DB_OWNER_USER:-pos_owner}
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgres://${DB_APP_USER:-pos_app}:${DB_APP_PASSWORD:?Set DB_APP_PASSWORD in .env}@db:5432/${DB_NAME:-pos}
+      DB_OWNER_USER: ${DB_OWNER_USER:-pos_owner}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_EAGER: "0"
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_started}
+    ports: ["8100:8100"]
+  worker:
+    build: ./backend
+    command: celery -A config worker -l info
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgres://${DB_APP_USER:-pos_app}:${DB_APP_PASSWORD:?Set DB_APP_PASSWORD in .env}@db:5432/${DB_NAME:-pos}
+      DB_OWNER_USER: ${DB_OWNER_USER:-pos_owner}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_started}
+volumes:
+  pgdata:
