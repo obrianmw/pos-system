@@ -1,6 +1,25 @@
 # POS System — multi-branch shop management, inventory & POS
 
+[![Tests](https://github.com/obrianmw/pos-system/actions/workflows/tests.yml/badge.svg)](https://github.com/obrianmw/pos-system/actions/workflows/tests.yml)
+![Python 3.13](https://img.shields.io/badge/python-3.13-3776AB?logo=python&logoColor=white)
+![Django 5.2](https://img.shields.io/badge/django-5.2-092E20?logo=django&logoColor=white)
+![React 18](https://img.shields.io/badge/react-18-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/typescript-5.6-3178C6?logo=typescript&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/postgresql-17-4169E1?logo=postgresql&logoColor=white)
+
 Python/Django backend (REST API + admin back office) and a React/TypeScript point-of-sale that keeps selling offline.
+Built for **Aden Shop**: several branches, a till per counter, and a back office for managers, accountants and HR.
+
+## Screenshots
+
+| | |
+|---|---|
+| **Till:** browse by department and subcategory, picture tiles, basket | **Dashboard:** today's figures, trends against the previous period, alerts |
+| [![Till](docs/screenshots/pos.jpg)](docs/screenshots/pos.jpg) | [![Dashboard](docs/screenshots/dashboard.jpg)](docs/screenshots/dashboard.jpg) |
+| **Products:** category tree with counts, photo grid | **Messages:** announcements with read receipts and confirmations |
+| [![Products](docs/screenshots/products.jpg)](docs/screenshots/products.jpg) | [![Messages](docs/screenshots/messages.jpg)](docs/screenshots/messages.jpg) |
+
+*Screenshots use the demo data from `seed_demo`. The product pictures are built-in illustrations; real shops upload photos.*
 
 | Layer | Choice |
 |---|---|
