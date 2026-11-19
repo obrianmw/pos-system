@@ -1,7 +1,7 @@
 import { errorText, toast } from "./ui";
 import { formDialog } from "../Dialog";
 import { useEffect, useRef, useState } from "react";
-import { FileText, Printer } from "lucide-react";
+import { FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { useBrandingState } from "../BrandMark";
 import { Invoice, printDoc } from "../docs";
 import { api, money } from "../api";
@@ -11,6 +11,7 @@ import { CategoryTree, useCategoryTree } from "./categories";
 import { ScanButton, ScannerModal } from "../Scanner";
 import { useScannerInput } from "../scanning";
 import { ListControls, SortHeader, useListState } from "./listing";
+import { StockUpload } from "./stockupload";
 
 // ---- shared bits ------------------------------------------------------------------------------
 const hashQuery = () => new URLSearchParams(location.hash.split("?")[1] || "");
@@ -169,6 +170,7 @@ export function Approvals({ ctx }: { ctx: Ctx }) {
 export function Stock({ ctx }: { ctx: Ctx }) {
   const [low, setLow] = useState(hashQuery().get("low") === "1");
   const [scanning, setScanning] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [search, setSearch] = useState("");
   useScannerInput(setSearch, !scanning);
   const [category, setCategory] = useState<number | null>(null);
@@ -215,6 +217,10 @@ export function Stock({ ctx }: { ctx: Ctx }) {
         <select aria-label="Stock level" value={sorter.state.filters.level || ""} onChange={(e) => sorter.setFilter("level", e.target.value)}>
           <option value="">Any level</option><option value="out">Out of stock</option><option value="low">Low</option><option value="ok">Healthy</option></select>
         {shown && <span className="muted">{shown.length} items</span>}
+        <span className="spacer" />
+        {(ctx.can("inventory.adjust") || ctx.can("inventory.receive")) &&
+          <button onClick={() => setUploading(true)}><FileSpreadsheet size={16} />Upload from Excel</button>}
+        {uploading && <StockUpload ctx={ctx} onClose={() => setUploading(false)} onDone={reload} />}
         {place && <span className="muted">{place.path}</span>}
       </div>
       <Status rows={shown} error={error} empty={low ? "Nothing is low. 👍" : place ? `No stock records in ${place.path}.` : "No stock records."} />

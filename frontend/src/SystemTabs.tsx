@@ -3,6 +3,20 @@
 import { ClipboardCheck, Database, LayoutDashboard, ShoppingCart } from "lucide-react";
 import type { Me } from "./App";
 import { hasBackOffice } from "./backoffice/BackOffice";
+import { api } from "./api";
+
+/** Open the database admin already signed in (one-time link from the API); the sign-in page if that fails. */
+async function openAdmin(e: React.MouseEvent, fallback: string) {
+  e.preventDefault();
+  const w = window.open("about:blank", "_blank"); // opened inside the click so pop-up blockers allow it
+  try {
+    const r = await api<{ path: string; port: number }>("/admin-handoff/", { method: "POST", branch: null });
+    const url = `http://${location.hostname}:${r.port}${r.path}`;
+    if (w) w.location.href = url; else location.href = url;
+  } catch {
+    if (w) w.location.href = fallback; else location.href = fallback;
+  }
+}
 
 export type SystemKey = "pos" | "office" | "count";
 
@@ -29,7 +43,7 @@ export function SystemTabs({ me, current }: { me: Me; current: SystemKey }) {
     <nav className="system-tabs" aria-label="Switch system">
       {list.map((s) => (
         <a key={s.key} href={s.href} title={s.title} aria-current={s.key === current ? "page" : undefined}
-           className={s.key === current ? "on" : ""} {...(s.external ? { target: "_blank", rel: "noopener" } : {})}>
+           className={s.key === current ? "on" : ""} {...(s.external ? { target: "_blank", rel: "noopener", onClick: (e: React.MouseEvent) => openAdmin(e, s.href) } : {})}>
           {s.icon}<span>{s.label}</span>
         </a>
       ))}

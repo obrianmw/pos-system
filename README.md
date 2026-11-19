@@ -155,6 +155,20 @@ Users can never approve their own requests. `Product.min_price` is a floor price
   - Set these in the payment method's settings: `qr_merchant`, `qr_bank` / `qr_account` / `qr_account_name`, or a `qr_template` with `{amount}`, `{ref}` and `{merchant}` for a provider's own QR format.
   - Online-gateway checkouts also show their link as a QR.
 
+### Uploading stock from Excel
+On *Stock → Upload from Excel*:
+1. Download the template (`stock-upload.xlsx`), or use your own sheet. It needs a header row with **SKU** or **Barcode**, and **Quantity**.
+   - Optional columns: Name, Category (like `Food/Meat`), Unit, Cost, Price, Reorder level.
+   - Common header names are recognised, such as Qty, Item code and Selling price.
+2. Choose the branch and what the quantities mean:
+   - **Add to stock**: goods in without a purchase order, or opening stock. The value is booked as Dr Inventory / Cr Opening stock.
+   - **Stock count (replace)**: the shelf count replaces the system quantity, and the differences go to shrinkage.
+3. **Check the file.** Every row is shown with its quantity now, the change and the result, and any problem is explained.
+   - Nothing is saved until every row is right; then everything is saved at once.
+   - People with catalog rights can create new products from rows that have a Name, Price and SKU. Missing categories are created too.
+
+Barcodes match in any UPC/EAN/GTIN length. Old `.xls` files must be saved as `.xlsx` first. Limits: 5 MB and 5,000 rows per upload. Every upload is in the audit log with its reference (`UPL-…`).
+
 ### Stock takes on phones
 - **Counting:** open `#/count` on a phone (the back office shows a QR to it) and sign in.
   - Counters start or join a stock take and scan items. Each scan adds one, or they can type the shelf total.
@@ -178,7 +192,7 @@ The till caches the branch catalog, prices, stock and payment methods in Indexed
 | TNM Mpamba direct | Placeholder: TNM supplies API docs to merchants on application. Use PayChangu for Mpamba until then. |
 
 ## Main API endpoints
-`/api/auth/token/` · `/api/me/` (+ `preferences`) · `/api/tills/` · `/api/cash/vaults/` (+ `assign`, `release`, `move`, `confirm`, `candidates`) · `/api/cash/transfers/` · `/api/stock-counts/` (+ `scan`, `submit`, `recount`, `approve`, `reopen`, `cancel`) · `/api/stock/lookup/?code=` · `/api/system/overview/` · `/api/branding/` (+ `settings`) · `/api/proformas/` · `/api/pos/catalog/` · `/api/till-sessions/` (+ `close`, `drop`, `summary`, `current`) · `/api/sales/` (checkout, + `sync`, `void`, `refund`, `cancel`, `add_payment`) · `/api/overrides/` (+ `approve`, `reject`) · `/api/products/` · `/api/stock-levels/` (+ `low`) · `/api/inventory/adjust/` · `/api/purchase-orders/` (+ `receive`) · `/api/transfers/` (+ `send`, `receive`) · `/api/accounting/*` · `/api/reports/trial-balance/` · `/api/reports/sales-summary/` · `/api/hr/*` · `/api/users/` (+ `assign_role`, `revoke_role`) · `/api/audit-logs/`
+`/api/auth/token/` · `/api/me/` (+ `preferences`) · `/api/tills/` · `/api/cash/vaults/` (+ `assign`, `release`, `move`, `confirm`, `candidates`) · `/api/cash/transfers/` · `/api/stock-counts/` (+ `scan`, `submit`, `recount`, `approve`, `reopen`, `cancel`) · `/api/stock/lookup/?code=` · `/api/stock/import/` (+ `template/`) · `/api/admin-handoff/` · `/api/system/overview/` · `/api/branding/` (+ `settings`) · `/api/proformas/` · `/api/pos/catalog/` · `/api/till-sessions/` (+ `close`, `drop`, `summary`, `current`) · `/api/sales/` (checkout, + `sync`, `void`, `refund`, `cancel`, `add_payment`) · `/api/overrides/` (+ `approve`, `reject`) · `/api/products/` · `/api/stock-levels/` (+ `low`) · `/api/inventory/adjust/` · `/api/purchase-orders/` (+ `receive`) · `/api/transfers/` (+ `send`, `receive`) · `/api/accounting/*` · `/api/reports/trial-balance/` · `/api/reports/sales-summary/` · `/api/hr/*` · `/api/users/` (+ `assign_role`, `revoke_role`) · `/api/audit-logs/`
 
 Send `X-Branch-ID: <id>` to choose the branch you are working in. Every list takes `?search=`, `?ordering=<field>` (or `-<field>`), its own filters and `?from=YYYY-MM-DD&to=YYYY-MM-DD`.
 
@@ -208,6 +222,8 @@ Everyone uses the same sign-in screen and goes straight to their place:
 - Organization Admin, Accountant, HR and branch admins go to the back office.
 - Anyone who can sell goes to their branch's till: the branch they last used on that device, else their first selling branch. People who sell at several branches can switch branch on the *Open till* screen.
 - Everyone who can use more than one part of the system gets tabs in every header: **Till · Back office · Stock · Database admin**. Database admin is shown only to organization admins; it opens the admin site on the API port in a new tab, and still works only from the admin networks.
+- The database admin site looks and behaves like the POS: the same sign-in card, the shop's name, logo and brand colours (kept readable in light and dark), the person's own light/dark choice, and the same tabs back to the till, back office and stock. Error pages use the brand colours too.
+- Opening **Database admin** from the POS signs you straight in through a one-time link (valid for one minute). The admin-network rule still applies.
 - Giving someone the Organization Admin role lets them sign in to the database admin site, and removing the role takes that away. Branch admins and other staff are told plainly that it's for organization admins.
 
 Every list has search, filters (status, type, dates and others) and sortable column headers.

@@ -10,7 +10,7 @@ from apps.core import api as core
 from apps.hr import api as hr
 from apps.inventory import api as inventory
 from apps.inventory import counts_api
-from apps.core import system
+from apps.core import admin_theme, system
 from apps.payments import api as payments
 from apps.sales import api as sales
 from apps.sales import reports
@@ -69,7 +69,10 @@ urlpatterns = [
     path("pos/catalog/", catalog.pos_catalog),
     path("inventory/adjust/", inventory.adjust),
     path("stock/lookup/", counts_api.lookup),
+    path("stock/import/", counts_api.stock_import),
+    path("stock/import/template/", counts_api.stock_import_template),
     path("system/overview/", system.overview),
+    path("admin-handoff/", admin_theme.admin_handoff),
     path("reports/sales-summary/", sales.sales_summary),
     path("reports/dashboard/", reports.dashboard),
     path("reports/trial-balance/", accounting.trial_balance),

@@ -255,3 +255,48 @@ def lookup(request):
     if not data:
         raise NotFound(f"No product with code {request.query_params.get('code', '')}.")
     return Response(data)
+
+
+# ------------------------------------------------------------------------------------------ Excel upload
+@api_view(["GET"])
+def stock_import_template(request):
+    """GET /api/stock/import/template/ -> stock-upload.xlsx to fill in."""
+    from django.http import HttpResponse
+    from . import importer
+    r = HttpResponse(importer.template_workbook(),
+                     content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    r["Content-Disposition"] = 'attachment; filename="stock-upload.xlsx"'
+    return r
+
+
+@api_view(["POST"])
+def stock_import(request):
+    """POST /api/stock/import/ (multipart): file, mode=add|set, apply=0|1.
+    apply=0 checks every row and shows what would change; apply=1 saves it, only if no row has an error."""
+    from rest_framework.parsers import MultiPartParser  # noqa: F401  (multipart is in the default parsers)
+    from . import importer
+    branch = active_branch(request)
+    u = request.user
+    mode = request.data.get("mode", "add")
+    if mode not in ("add", "set"):
+        raise ValidationError({"mode": "Choose add (goods in / opening stock) or set (stock count)."})
+    needed = ["inventory.adjust"] if mode == "set" else ["inventory.adjust", "inventory.receive"]
+    if not any(u.has_branch_perm(branch, p) for p in needed):
+        raise PermissionDenied("You can't change stock at this branch.")
+    f = request.FILES.get("file")
+    if not f:
+        raise ValidationError({"file": "Choose an Excel (.xlsx) or CSV file."})
+    can_create = u.has_org_perm("catalog.manage") or u.has_branch_perm(branch, "catalog.manage")
+    try:
+        rows = importer.read_rows(f)
+    except importer.ImportError_ as e:
+        raise ValidationError({"file": str(e)})
+    results, summary = importer.check(rows, branch=branch, mode=mode, can_create=can_create)
+    out = {"summary": summary, "rows": results, "mode": mode, "branch": branch.name, "can_create": can_create}
+    if str(request.data.get("apply", "0")).lower() in ("1", "true", "yes"):
+        if summary["errors"]:
+            raise ValidationError({"detail": f"{summary['errors']} row(s) have problems. Fix them and upload again.",
+                                   **out})
+        out["applied"] = importer.apply(results, branch=branch, mode=mode, user=u, can_create=can_create,
+                                        file_name=f.name[:80])
+    return Response(out)

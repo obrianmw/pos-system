@@ -1,0 +1,107 @@
+{% extends "admin/base.html" %}
+{% comment %}The database admin site, dressed like the POS: shop name and logo, brand colours that stay
+readable in light and dark, the person's own theme, and tabs back to the till / back office / stock.{% endcomment %}
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ brand.name }} database admin{% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  :root, html[data-theme="light"] {
+    --font-family-primary: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --body-bg: {{ brand.LIGHT.bg }}; --body-fg: {{ brand.LIGHT.text }}; --body-quiet-color: {{ brand.LIGHT.muted }};
+    --body-medium-color: #374151; --body-loud-color: {{ brand.LIGHT.text }};
+    --primary: {{ brand.light.fill }}; --secondary: {{ brand.light.fill }}; --accent: {{ brand.light.ink }};
+    --primary-fg: {{ brand.light.on_fill }};
+    --header-bg: {{ brand.LIGHT.card }}; --header-color: {{ brand.LIGHT.muted }}; --header-branding-color: {{ brand.LIGHT.text }};
+    --header-link-color: {{ brand.LIGHT.text }};
+    --breadcrumbs-bg: {{ brand.LIGHT.card2 }}; --breadcrumbs-fg: {{ brand.LIGHT.muted }}; --breadcrumbs-link-fg: {{ brand.light.ink }};
+    --link-fg: {{ brand.light.ink }}; --link-hover-color: {{ brand.LIGHT.text }}; --link-selected-fg: {{ brand.light.ink }};
+    --hairline-color: {{ brand.LIGHT.line }}; --border-color: #d1d5db;
+    --darkened-bg: {{ brand.LIGHT.card2 }}; --selected-bg: {{ brand.LIGHT.line }}; --selected-row: #fef9c3;
+    --button-fg: {{ brand.light.on_fill }}; --button-bg: {{ brand.light.fill }}; --button-hover-bg: {{ brand.light.ink }};
+    --default-button-bg: {{ brand.light.fill }}; --default-button-hover-bg: {{ brand.light.ink }};
+    --object-tools-bg: #374151; --object-tools-hover-bg: #111827;
+    --pos-card: {{ brand.LIGHT.card }}; --pos-line: {{ brand.LIGHT.line }}; --pos-shadow: 0 1px 3px rgb(16 24 40 / .08);
+  }
+  html[data-theme="dark"] {
+    --body-bg: {{ brand.DARK.bg }}; --body-fg: {{ brand.DARK.text }}; --body-quiet-color: {{ brand.DARK.muted }};
+    --body-medium-color: #c3cad5; --body-loud-color: #ffffff;
+    --primary: {{ brand.dark.fill }}; --secondary: {{ brand.dark.fill }}; --accent: {{ brand.dark.ink }};
+    --primary-fg: {{ brand.dark.on_fill }};
+    --header-bg: {{ brand.DARK.card }}; --header-color: {{ brand.DARK.muted }}; --header-branding-color: {{ brand.DARK.text }};
+    --header-link-color: {{ brand.DARK.text }};
+    --breadcrumbs-bg: {{ brand.DARK.card2 }}; --breadcrumbs-fg: {{ brand.DARK.muted }}; --breadcrumbs-link-fg: {{ brand.dark.ink }};
+    --link-fg: {{ brand.dark.ink }}; --link-hover-color: #ffffff; --link-selected-fg: {{ brand.dark.ink }};
+    --hairline-color: {{ brand.DARK.line }}; --border-color: #334155;
+    --darkened-bg: {{ brand.DARK.card2 }}; --selected-bg: {{ brand.DARK.line }}; --selected-row: #3b3412;
+    --button-fg: {{ brand.dark.on_fill }}; --button-bg: {{ brand.dark.fill }}; --button-hover-bg: {{ brand.dark.ink }};
+    --default-button-bg: {{ brand.dark.fill }}; --default-button-hover-bg: {{ brand.dark.ink }};
+    --object-tools-bg: #334155; --object-tools-hover-bg: #475569;
+    --pos-card: {{ brand.DARK.card }}; --pos-line: {{ brand.DARK.line }}; --pos-shadow: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="auto"] {
+      --body-bg: {{ brand.DARK.bg }}; --body-fg: {{ brand.DARK.text }}; --body-quiet-color: {{ brand.DARK.muted }};
+      --body-medium-color: #c3cad5; --body-loud-color: #ffffff;
+      --primary: {{ brand.dark.fill }}; --secondary: {{ brand.dark.fill }}; --accent: {{ brand.dark.ink }};
+      --primary-fg: {{ brand.dark.on_fill }};
+      --header-bg: {{ brand.DARK.card }}; --header-color: {{ brand.DARK.muted }}; --header-branding-color: {{ brand.DARK.text }};
+      --header-link-color: {{ brand.DARK.text }};
+      --breadcrumbs-bg: {{ brand.DARK.card2 }}; --breadcrumbs-fg: {{ brand.DARK.muted }}; --breadcrumbs-link-fg: {{ brand.dark.ink }};
+      --link-fg: {{ brand.dark.ink }}; --link-hover-color: #ffffff; --link-selected-fg: {{ brand.dark.ink }};
+      --hairline-color: {{ brand.DARK.line }}; --border-color: #334155;
+      --darkened-bg: {{ brand.DARK.card2 }}; --selected-bg: {{ brand.DARK.line }}; --selected-row: #3b3412;
+      --button-fg: {{ brand.dark.on_fill }}; --button-bg: {{ brand.dark.fill }}; --button-hover-bg: {{ brand.dark.ink }};
+      --default-button-bg: {{ brand.dark.fill }}; --default-button-hover-bg: {{ brand.dark.ink }};
+      --object-tools-bg: #334155; --object-tools-hover-bg: #475569;
+      --pos-card: {{ brand.DARK.card }}; --pos-line: {{ brand.DARK.line }}; --pos-shadow: none;
+    }
+  }
+  body { font-family: var(--font-family-primary); -webkit-font-smoothing: antialiased; }
+  #header { border-bottom: 1px solid var(--pos-line); box-shadow: var(--pos-shadow); padding: 10px 24px; gap: 14px; flex-wrap: wrap; }
+  #branding h1, #site-name { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.05rem; margin: 0; }
+  #site-name a, #site-name a:link, #site-name a:visited { color: var(--header-branding-color); display: inline-flex; align-items: center; gap: 10px; }
+  .pos-mark { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-weight: 800; flex: none;
+    background: var(--primary); color: var(--primary-fg); overflow: hidden; }
+  .pos-mark img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+  .pos-sub { font-weight: 500; color: var(--header-color); font-size: .8rem; }
+  .pos-tabs { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--pos-line); border-radius: 8px; background: var(--darkened-bg); }
+  .pos-tabs a { padding: 5px 11px; border-radius: 6px; color: var(--body-quiet-color) !important; font-size: .82rem; font-weight: 500; text-decoration: none; }
+  .pos-tabs a:hover { background: var(--pos-card); color: var(--body-fg) !important; }
+  .pos-tabs a.on { background: var(--pos-card); color: var(--body-fg) !important; font-weight: 600; box-shadow: var(--pos-shadow); }
+  #user-tools a { border-bottom: 0; }
+  .module, #changelist .changelist-form-container, .inline-group { border-radius: 12px; }
+  .module { border: 1px solid var(--hairline-color); background: var(--pos-card); overflow: hidden; }
+  .module h2, .module caption, .inline-group h2 { background: var(--darkened-bg); color: var(--body-fg); text-transform: none; letter-spacing: 0; font-size: .85rem; }
+  .button, input[type=submit], input[type=button], .submit-row input, a.button { border-radius: 8px; font-weight: 600; }
+  input[type=text], input[type=password], input[type=email], input[type=url], input[type=number], input[type=tel], textarea, select, .vTextField {
+    border-radius: 8px; border-color: var(--border-color); }
+  #nav-sidebar { border-right: 1px solid var(--hairline-color); }
+  #nav-sidebar .current-model { background: var(--selected-bg); }
+  div.breadcrumbs { border-bottom: 1px solid var(--hairline-color); }
+  .pos-note { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--hairline-color); background: var(--darkened-bg);
+    color: var(--body-quiet-color); font-size: .85rem; }
+</style>
+{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+{% if brand.theme %}<script>
+  // Follow the theme this person chose in the POS (same account), until they change it here.
+  try { if (!sessionStorage.getItem("pos-theme-applied")) { localStorage.setItem("theme", "{{ brand.theme }}");
+    document.documentElement.dataset.theme = "{{ brand.theme }}"; sessionStorage.setItem("pos-theme-applied", "1"); } } catch (e) {}
+</script>{% endif %}
+{% endblock %}
+
+{% block branding %}
+<div id="site-name"><a href="{% url 'admin:index' %}">
+  <span class="pos-mark" aria-hidden="true">{% if brand.logo_url %}<img src="{{ brand.logo_url }}" alt="">{% else %}{{ brand.initial }}{% endif %}</span>
+  <span>{{ brand.name }} <span class="pos-sub">· Database admin</span></span>
+</a></div>
+{% if user.is_active and user.is_staff %}
+<nav class="pos-tabs" aria-label="Switch system">
+  {% for label, href in brand.tabs %}<a href="{{ href }}">{{ label }}</a>{% endfor %}
+  <a class="on" aria-current="page" href="{% url 'admin:index' %}">Database admin</a>
+</nav>
+{% endif %}
+{% endblock %}
+
+{% block nav-global %}{% endblock %}

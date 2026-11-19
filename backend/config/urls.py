@@ -7,6 +7,7 @@ from django.urls import include, path
 from django.views.generic import RedirectView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from apps.core.admin_theme import admin_handoff_open
 from apps.core.security import admin_site_permission
 
 admin.site.site_header = "POS System"
@@ -34,6 +35,7 @@ admin.site.login_form = OrgAdminLoginForm
 
 urlpatterns = [
     path("", RedirectView.as_view(url="/admin/", permanent=False)),  # this port is the API + database admin
+    path("admin/handoff/", admin_handoff_open),  # signed in from the POS (one-time link)
     path("admin/", admin.site.urls),
     path("api/auth/token/", TokenObtainPairView.as_view()),
     path("api/auth/refresh/", TokenRefreshView.as_view()),

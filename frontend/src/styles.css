@@ -625,3 +625,16 @@ nav.system-tabs a, .office nav.system-tabs a { display: inline-flex; font-weight
 .system-tabs a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 700px) { .system-tabs a span { display: none; } .system-tabs a { padding: 6px 9px; } }
 .center.card > .system-tabs { align-self: center; }
+
+/* ---- stock upload ---- */
+.upload { width: min(980px, 100%); display: flex; flex-direction: column; gap: 12px; max-height: 92vh; overflow: auto; }
+.upload .steps { margin: 0; padding-left: 20px; display: grid; gap: 12px; }
+.upload .steps .link { display: inline-flex; gap: 4px; align-items: center; padding: 0; }
+.drop { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 22px; border: 2px dashed var(--line);
+  border-radius: var(--radius); cursor: pointer; color: var(--muted); background: var(--card-2); text-align: center; }
+.drop:hover, .drop:focus-visible { border-color: var(--primary); color: var(--text); outline: none; }
+.drop.has { border-style: solid; color: var(--text); }
+.upload-table { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.upload-table thead th { position: sticky; top: 0; z-index: 1; }
+.row-bad td { background: color-mix(in srgb, var(--error) 7%, transparent); }
+.upload-done { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 18px; }

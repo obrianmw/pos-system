@@ -35,8 +35,8 @@ PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} · POS System</title>
 <style>
-  :root {{ color-scheme: light dark; --bg:#f4f6f8; --card:#fff; --text:#111827; --muted:#6b7280; --line:#e5e7eb; --primary:#0f766e; --accent:{accent}; }}
-  @media (prefers-color-scheme: dark) {{ :root {{ --bg:#0b0f14; --card:#131920; --text:#e6e9ee; --muted:#94a0b0; --line:#243040; --primary:#14b8a6; }} }}
+  :root {{ color-scheme: light dark; --bg:#f4f6f8; --card:#fff; --text:#111827; --muted:#6b7280; --line:#e5e7eb; --primary:{pl}; --on:{onl}; --accent:{accent}; }}
+  @media (prefers-color-scheme: dark) {{ :root {{ --bg:#0b0f14; --card:#131920; --text:#e6e9ee; --muted:#94a0b0; --line:#243040; --primary:{pd}; --on:{ond}; }} }}
   body {{ margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--text);
          font-family: system-ui, -apple-system, "Segoe UI", sans-serif; padding:16px; box-sizing:border-box; }}
   .card {{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:32px; max-width:440px; text-align:center;
@@ -47,7 +47,7 @@ PAGE = """<!doctype html>
   .ref {{ font-family: ui-monospace, Consolas, monospace; font-size:.85rem; background:var(--bg); border:1px solid var(--line);
          border-radius:6px; padding:6px 10px; display:inline-block; margin:-.25rem 0 1.25rem; color:var(--text); }}
   .actions {{ display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }}
-  a, button {{ font:inherit; background:var(--primary); color:#fff; text-decoration:none; padding:10px 18px; border-radius:8px;
+  a, button {{ font:inherit; background:var(--primary); color:var(--on); text-decoration:none; padding:10px 18px; border-radius:8px;
               font-weight:600; border:0; cursor:pointer; }}
   .ghost {{ background:transparent; color:var(--text); border:1px solid var(--line); }}
 </style></head>
@@ -77,8 +77,14 @@ def error_response(request, status, title=None, message=None, ref=None):
         home = escape(getattr(settings, "FRONTEND_URL", "/"))
         accent = "#d03b3b" if status >= 500 else "var(--primary)"
         ref_html = f'<div class="ref">Reference: {escape(ref)}</div>' if ref else ""
+        try:  # the shop's own colours, readable in light and dark
+            from .admin_theme import brand_context
+            b = brand_context(request)
+            colours = {"pl": b["light"]["fill"], "onl": b["light"]["on_fill"], "pd": b["dark"]["fill"], "ond": b["dark"]["on_fill"]}
+        except Exception:
+            colours = {"pl": "#0f766e", "onl": "#ffffff", "pd": "#14b8a6", "ond": "#0b0f14"}
         response = HttpResponse(PAGE.format(status=status, title=escape(title), message=message_html, home=home,
-                                            ref=ref_html, accent=accent), status=status)
+                                            ref=ref_html, accent=accent, **colours), status=status)
     response._friendly_error = True
     return response
 
