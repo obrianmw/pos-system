@@ -21,7 +21,7 @@ def debug(settings):
     return settings
 
 
-@pytest.mark.parametrize("path", ["/", "/nothing-here", "/media/products/missing.png"])
+@pytest.mark.parametrize("path", ["/nothing-here", "/media/products/missing.png"])  # "/" opens the admin sign-in
 def test_404_page(debug, path):
     r = Client(REMOTE_ADDR="127.0.0.1").get(path)
     assert r.status_code == 404

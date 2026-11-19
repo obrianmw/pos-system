@@ -222,6 +222,8 @@ class LeaveViewSet(viewsets.ModelViewSet):
     serializer_class = LeaveSerializer
     http_method_names = ["get", "post"]
     filterset_fields = ["status", "employee", "leave_type"]
+    search_fields = ["employee__first_name", "employee__last_name", "reason"]
+    ordering_fields = ["created_at", "start_date", "end_date", "status"]
 
     def get_queryset(self):
         u = self.request.user

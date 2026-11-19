@@ -6,6 +6,8 @@
   control.py restart           stops, then starts both
   control.py status            shows whether each is up (no password needed)
   control.py change-password   changes the server control password
+  control.py phones-on         lets phones/tablets on the shop network use the web app (https, for cameras)
+  control.py phones-off        back to this computer only
 
 Start, Stop, Restart, Change password and closing the window all need the server control password.
 Closing the window stops the servers. The password is chosen the first time it is asked for and stored
@@ -40,15 +42,71 @@ EVENT_LOG = os.path.join(RUN, "control.log")
 ITERATIONS = 600_000
 MAX_FAILS = 5
 LOCK_SECONDS = 15 * 60
+LAN_FILE = os.path.join(RUN, "lan-mode")  # present = "Phones on"
 
 SERVERS = {
-    "api": {"label": "API + admin", "port": 8100, "url": "http://localhost:8100/admin/"},
-    "web": {"label": "POS + back office", "port": 5180, "url": "http://localhost:5180/"},
+    "api": {"label": "API + admin", "port": 8100, "path": "/admin/"},
+    "web": {"label": "POS + back office", "port": 5180, "path": "/"},
 }
+# If another program already uses a port, the next free one is used and remembered here.
+PORTS_FILE = os.path.join(RUN, "ports.json")
+
+
+def _set_port(name, port):
+    SERVERS[name]["port"] = port
+    SERVERS[name]["url"] = f"http://localhost:{port}{SERVERS[name]['path']}"
+
+
+def load_ports():
+    import json
+    try:
+        with open(PORTS_FILE, encoding="utf-8") as f:
+            saved = json.load(f)
+    except (OSError, ValueError):
+        saved = {}
+    for name in SERVERS:
+        _set_port(name, int(saved.get(name, SERVERS[name]["port"])))
+
+
+def save_ports():
+    import json
+    os.makedirs(RUN, exist_ok=True)
+    with open(PORTS_FILE, "w", encoding="utf-8") as f:
+        json.dump({n: s["port"] for n, s in SERVERS.items()}, f)
+
+
+load_ports()
 
 
 class Cancelled(Exception):
     pass
+
+
+def lan_on():
+    return os.path.exists(LAN_FILE)
+
+
+def lan_addresses():
+    """This computer's address(es) on the local network (no traffic is sent)."""
+    found = []
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            found.append(s.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127.") and ip not in found:
+                found.append(ip)
+    except OSError:
+        pass
+    return found
+
+
+def phone_urls():
+    return [f"https://{ip}:{SERVERS['web']['port']}/#/count" for ip in lan_addresses()]
 
 
 # ------------------------------------------------------------------ event log
@@ -189,6 +247,49 @@ def port_open(port):
     return False
 
 
+def is_ours(name, port):
+    """Is the program on this port our own API / web app (e.g. started outside this tool)?"""
+    import urllib.request
+    url = f"http://127.0.0.1:{port}/api/branding/" if name == "api" else f"http://127.0.0.1:{port}/"
+    try:
+        with urllib.request.urlopen(url, timeout=1.5) as r:
+            body = r.read(4000).decode("utf-8", "replace")
+    except Exception:
+        try:  # web app with "Phones on" answers https
+            import ssl
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(url.replace("http:", "https:"), timeout=1.5, context=ctx) as r:
+                body = r.read(4000).decode("utf-8", "replace")
+        except Exception:
+            return False
+    return ('"display_name"' in body or '"name"' in body) if name == "api" else "/src/main.tsx" in body
+
+
+def free_port(start):
+    for port in range(start, start + 200):
+        if not port_open(port):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(("127.0.0.1", port))
+                    return port
+                except OSError:
+                    continue
+    raise RuntimeError(f"No free port found from {start}.")
+
+
+def claim_port(name):
+    """Keep the usual port unless another program holds it; then move to the next free one."""
+    srv = SERVERS[name]
+    note = ""
+    if port_open(srv["port"]) and read_pid(name) is None and not is_ours(name, srv["port"]):
+        old = srv["port"]
+        _set_port(name, free_port(old + 1))
+        save_ports()
+        note = f" (port {old} is used by another program, so it moved to {srv['port']})"
+        event(f"{srv['label']}: port {old} busy, using {srv['port']}")
+    return note
+
+
 def pid_file(name):
     return os.path.join(RUN, f"{name}.pid")
 
@@ -236,6 +337,7 @@ def kill_tree(pid):
 # ------------------------------------------------------------------ start / stop (no password checks here)
 def start_one(name):
     srv = SERVERS[name]
+    note = claim_port(name)
     if port_open(srv["port"]):
         mine = read_pid(name) is not None
         return f"{srv['label']}: already running on port {srv['port']}" + ("" if mine else " (started outside this tool)")
@@ -247,15 +349,23 @@ def start_one(name):
         cmd = [VENV_PY, "manage.py", "runserver", f"127.0.0.1:{srv['port']}"]
         cwd = BACKEND
     else:
-        cmd = ["npm.cmd" if os.name == "nt" else "npm", "run", "dev", "--", "--host", "127.0.0.1"]
+        # Host comes from vite.config.ts: 127.0.0.1, or the shop network (https) when phones are on.
+        cmd = ["npm.cmd" if os.name == "nt" else "npm", "run", "dev"]
         cwd = FRONTEND
+    api, web = SERVERS["api"]["port"], SERVERS["web"]["port"]
+    env = {**os.environ, "POS_LAN": "1" if (name == "web" and lan_on()) else "0",
+           # Each side learns where the other one is, whichever ports they ended up on.
+           "POS_API": f"http://127.0.0.1:{api}", "POS_API_PORT": str(api), "POS_WEB_PORT": str(web),
+           "POS_WEB_URL": f"{'https' if lan_on() else 'http'}://localhost:{web}/"}
     p = subprocess.Popen(cmd, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                         creationflags=NO_WINDOW, start_new_session=(os.name != "nt"))
+                         creationflags=NO_WINDOW, start_new_session=(os.name != "nt"), env=env)
     with open(pid_file(name), "w") as f:
         f.write(str(p.pid))
     for _ in range(60):  # wait up to ~30 s for the port
         if port_open(srv["port"]):
-            return f"{srv['label']}: started on {srv['url']}"
+            if name == "web" and lan_on():
+                return f"{srv['label']}: started on https://localhost:{srv['port']}/{note} - phones: " + ", ".join(phone_urls())
+            return f"{srv['label']}: started on {srv['url']}{note}"
         if p.poll() is not None:
             os.remove(pid_file(name))
             return f"{srv['label']}: FAILED to start - see .run\\{name}.log"
@@ -286,6 +396,10 @@ def _start():
     problems = check_setup()
     if problems:
         return problems
+    # Settle both ports first: each server is told where the other one is.
+    for n in SERVERS:
+        if read_pid(n) is None:
+            claim_port(n)
     out = [start_one(n) for n in SERVERS]
     event("Started: " + " | ".join(out))
     return out
@@ -303,10 +417,31 @@ def status():
         up = port_open(srv["port"])
         extra = f"  up {uptime(name)}" if up and uptime(name) else ""
         out.append(f"{srv['label']:<18} port {srv['port']}  {'RUNNING' if up else 'stopped'}{extra}")
+    if lan_on():
+        out.append("Phones ON (https on the shop network): " + (", ".join(phone_urls()) or "no network address found"))
+    else:
+        out.append("Phones off (this computer only)")
     return out
 
 
-ACTIONS = {"start": ("Start", _start), "stop": ("Stop", _stop), "restart": ("Restart", lambda: _stop() + _start())}
+def _phones(on):
+    os.makedirs(RUN, exist_ok=True)
+    if on:
+        open(LAN_FILE, "w").close()
+    elif lan_on():
+        os.remove(LAN_FILE)
+    event("Phones " + ("ON" if on else "off"))
+    out = [f"Phones {'ON' if on else 'off'}."]
+    if port_open(SERVERS["web"]["port"]):  # restart the web app so the change takes effect
+        out += [stop_one("web"), start_one("web")]
+    if on:
+        out.append("Phones open the address above and accept the security warning once (the certificate is "
+                   "made on this computer). Windows may ask to allow Node.js through the firewall on private networks.")
+    return out
+
+
+ACTIONS = {"start": ("Start", _start), "stop": ("Stop", _stop), "restart": ("Restart", lambda: _stop() + _start()),
+           "phones-on": ("Phones on", lambda: _phones(True)), "phones-off": ("Phones off", lambda: _phones(False))}
 
 
 def guarded(action, read):
@@ -413,6 +548,7 @@ def window(title):
         ttk.Button(buttons, text="Restart", command=lambda: run("restart")),
         ttk.Button(buttons, text="Open POS", command=lambda: webbrowser.open(SERVERS["web"]["url"])),
         ttk.Button(buttons, text="Back office", command=lambda: webbrowser.open(SERVERS["web"]["url"] + "#/office")),
+        ttk.Button(buttons, text="Phones on/off", command=lambda: run("phones-off" if lan_on() else "phones-on")),
         ttk.Button(buttons, text="Change password", command=do_change),
     ]
     for b in btns:

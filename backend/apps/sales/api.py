@@ -97,13 +97,13 @@ class TillSessionViewSet(BranchScopedViewSet):
         return qs.filter(Q(cashier=u) | Q(branch__in=seeing_all))
 
     def create(self, request, *args, **kwargs):
-        """Open a till: {"till": id, "opening_float": "5000"}"""
+        """Open a till: {"till": id}. Tills open at zero; the vault holder hands over the float."""
         till = Till.objects.filter(pk=request.data.get("till"), branch__in=request.user.accessible_branch_ids(),
                                    is_active=True).first()
         if not till:
             raise ValidationError({"till": "Unknown till."})
         try:
-            s = services.open_till(till=till, user=request.user, opening_float=request.data.get("opening_float", 0))
+            s = services.open_till(till=till, user=request.user, opening_float=request.data.get("opening_float") or 0)
         except services.POSError as e:
             return pos_error_response(e)
         return Response(self.get_serializer(s).data, status=201)
@@ -123,6 +123,24 @@ class TillSessionViewSet(BranchScopedViewSet):
             return pos_error_response(e)
         return Response(self.get_serializer(s).data)
 
+    @action(detail=True, methods=["post"])
+    def drop(self, request, pk=None):
+        """{"amount", "note"?}: the cashier hands spare cash to the vault mid-shift. It waits for the vault
+        holder to count and confirm it."""
+        from apps.cash import services as cash
+        session = self.get_object()
+        if session.cashier_id != request.user.pk:
+            raise PermissionDenied("Only the cashier on this till can hand over a cash drop.")
+        try:
+            t = cash.move(branch=session.branch, kind="drop", amount=request.data.get("amount"), by=request.user,
+                          session=session, note=request.data.get("note", ""))
+        except cash.CashError as e:
+            if e.status == 403:
+                raise PermissionDenied(str(e))
+            raise ValidationError({"detail": str(e)})
+        return Response({"id": t.pk, "amount": str(t.amount), "status": t.status,
+                         "till_balance": str(cash.till_balance(session))}, status=201)
+
     @action(detail=True)
     def summary(self, request, pk=None):
         """X/Z report: totals per payment method for the session."""
@@ -139,7 +157,8 @@ class SaleViewSet(BranchScopedViewSet):
     http_method_names = ["get", "post"]
     perms = {"*": "pos.sell"}
     filterset_fields = ["status", "kind", "till_session", "needs_review", "cashier"]
-    search_fields = ["number", "customer__name", "customer__phone"]
+    search_fields = ["number", "customer__name", "customer__phone", "cashier__first_name", "cashier__last_name"]
+    ordering_fields = ["created_at", "number", "total", "status", "kind"]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -260,6 +279,8 @@ class OverrideViewSet(BranchScopedViewSet):
     http_method_names = ["get", "post"]
     perms = {"*": "pos.sell"}
     filterset_fields = ["status", "kind"]
+    search_fields = ["reason", "product__name"]
+    ordering_fields = ["created_at", "kind", "status"]
 
     def perform_create(self, serializer):
         branch = active_branch(self.request)

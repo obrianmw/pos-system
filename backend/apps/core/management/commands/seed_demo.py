@@ -39,6 +39,8 @@ USERS = [
     ("ll_super", "Lilongwe", "Supervisor", "Supervisor", "ll", True),
     ("ll_cash1", "Lilongwe", "Cashier", "Cashier", "ll", False),
     ("ll_store", "Lilongwe", "Storekeeper", "Storekeeper", "ll", False),
+    ("ll_count", "Lilongwe", "Stock Taker", "Stock Taker", "ll", False),
+    ("ll_verify", "Lilongwe", "Stock Verifier", "Stock Verifier", "ll", False),
     ("bt_admin", "Blantyre", "Admin", "Branch Admin", "bt", False),
     ("bt_super", "Blantyre", "Supervisor", "Supervisor", "bt", True),
     ("bt_cash1", "Blantyre", "Cashier", "Cashier", "bt", False),
@@ -52,6 +54,11 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         org, _ = Organization.objects.get_or_create(code="demo", defaults={"name": "Aden Shop", "currency": "MWK"})
         setup_organization(org)
+        from apps.core.models import Branding
+        Branding.objects.get_or_create(organization=org, defaults={
+            "display_name": "Aden Shop", "tagline": "Groceries, fresh food and more",
+            "doc_business_name": "Aden Shop", "doc_phone": "+265 1 000 000", "doc_email": "hello@adenshop.example",
+            "doc_address": "City Centre, Lilongwe, Malawi"})
         branches = {}
         for code, name in [("ll", "Lilongwe City Centre"), ("bt", "Blantyre Limbe")]:
             b, _ = Branch.objects.get_or_create(organization=org, code=code, defaults={
@@ -122,6 +129,7 @@ class Command(BaseCommand):
 
         from django.core.management import call_command
         call_command("seed_catalog", org=org.code, stdout=self.stdout)
+        call_command("seed_cash", org=org.code, stdout=self.stdout)
         self.stdout.write(self.style.SUCCESS(
             f"Demo data ready. Users: {', '.join(u[0] for u in USERS)}\n"
             f"Password for all: {DEMO_PASSWORD}   Supervisor PIN (owner, ll_super, bt_super): {DEMO_PIN}"))

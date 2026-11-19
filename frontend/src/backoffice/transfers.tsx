@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, money } from "../api";
 import type { Ctx } from "./BackOffice";
+import { DateFilters, dateFilters, SortHeader, useListState } from "./listing";
 import { Err, Errors, toErrors, useOptions } from "./ui";
 
 const STATUS: Record<string, string> = { draft: "Draft", sent: "In transit", received: "Received", cancelled: "Cancelled" };
@@ -25,7 +26,15 @@ export function Transfers({ ctx }: { ctx: Ctx }) {
     api(`/transfers/?${q}`, { branch: ctx.branch }).then((d) => setRows(d.results)).catch((e) => setError(e.message));
   }, [status, tick, ctx.branch]);
 
+  const [search, setSearch] = useState("");
+  const sorter = useListState({ sort: "-created" });
+  useEffect(() => { sorter.setTyped(search); }, [search]);
   const direction = (t: any) => !ctx.branch ? null : String(t.from_branch) === ctx.branch ? "Outgoing" : "Incoming";
+  const shown = rows && sorter.apply(rows, {
+    text: (t: any) => `${t.number} ${t.from_branch_name} ${t.to_branch_name} ${t.lines.map((l: any) => l.product_name).join(" ")}`,
+    filters: { ...dateFilters((t: any) => t.created_at), dir: (t: any, v) => direction(t) === v },
+    sorts: { number: (t: any) => t.number, created: (t: any) => t.created_at, from: (t: any) => t.from_branch_name, to: (t: any) => t.to_branch_name,
+             items: (t: any) => t.lines.length, status: (t: any) => t.status, value: (t: any) => Number(t.value) } });
   // What needs doing by me: receive things in transit to my branch, send my drafts.
   const todo = (t: any) => (t.status === "sent" && perms(ctx, t.to_branch)) ? "Receive" :
     (t.status === "draft" && perms(ctx, t.from_branch)) ? "Send" : "";
@@ -37,6 +46,10 @@ export function Transfers({ ctx }: { ctx: Ctx }) {
           <option value="">All statuses</option>
           {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
+        <input type="search" placeholder="Transfer no., branch or item" aria-label="Search transfers" value={search} onChange={(e) => setSearch(e.target.value)} />
+        {ctx.branch && <select aria-label="Direction" value={sorter.state.filters.dir || ""} onChange={(e) => sorter.setFilter("dir", e.target.value)}>
+          <option value="">In and out</option><option value="Incoming">Incoming</option><option value="Outgoing">Outgoing</option></select>}
+        <DateFilters list={sorter} />
         <span className="spacer" />
         {canCreate && <button className="primary" onClick={() => setCreating(true)}>+ New transfer</button>}
       </div>
@@ -44,9 +57,10 @@ export function Transfers({ ctx }: { ctx: Ctx }) {
       {rows && !rows.length && <p className="muted">No transfers yet.</p>}
       {!!rows?.length && (
         <table className="grid-table clickable">
-          <thead><tr><th>Transfer</th><th>Created</th><th>From</th><th>To</th><th className="num">Items</th>
-            <th>Status</th><th className="num">Value</th><th /></tr></thead>
-          <tbody>{rows.map((t) => (
+          <thead><tr><SortHeader list={sorter} k="number">Transfer</SortHeader><SortHeader list={sorter} k="created">Created</SortHeader>
+            <SortHeader list={sorter} k="from">From</SortHeader><SortHeader list={sorter} k="to">To</SortHeader><SortHeader list={sorter} k="items" num>Items</SortHeader>
+            <SortHeader list={sorter} k="status">Status</SortHeader><SortHeader list={sorter} k="value" num>Value</SortHeader><th /></tr></thead>
+          <tbody>{(shown || []).map((t) => (
             <tr key={t.id} tabIndex={0} onClick={() => setOpen(t)} onKeyDown={(e) => e.key === "Enter" && setOpen(t)}>
               <td>{t.number}{direction(t) && <span className="tag">{direction(t)}</span>}</td>
               <td>{new Date(t.created_at).toLocaleDateString()}</td>

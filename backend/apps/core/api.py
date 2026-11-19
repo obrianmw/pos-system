@@ -10,7 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
-from .models import AuditLog, Branch, Organization, Till
+from .models import AuditLog, Branch, Organization, Till, audit
 
 
 def branches_with(user, code):
@@ -135,10 +135,43 @@ class BranchSerializer(serializers.ModelSerializer):
 
 
 class TillSerializer(serializers.ModelSerializer):
+    user_names = serializers.SerializerMethodField()
+    open_session = serializers.SerializerMethodField()
+    assigned_to_me = serializers.SerializerMethodField()
+
     class Meta:
         model = Till
-        fields = "__all__"
-        extra_kwargs = {"branch": {"required": False}}
+        fields = ["id", "branch", "name", "code", "is_active", "users", "user_names", "open_session", "assigned_to_me"]
+        extra_kwargs = {"branch": {"required": False}, "users": {"required": False}}
+
+    def get_user_names(self, t):
+        return [{"id": u.pk, "name": u.get_full_name() or u.username} for u in t.users.all()]
+
+    def get_open_session(self, t):
+        from apps.sales.models import TillSession
+        s = TillSession.objects.filter(till=t, status="open").select_related("cashier").first()
+        return {"id": s.pk, "cashier": s.cashier_id, "cashier_name": s.cashier.get_full_name() or s.cashier.username,
+                "opened_at": s.opened_at} if s else None
+
+    def get_assigned_to_me(self, t):
+        return t.users.filter(pk=self.context["request"].user.pk).exists()
+
+    def validate(self, attrs):
+        branch = attrs.get("branch") or getattr(self.instance, "branch", None)
+        if branch is None and "request" in self.context:  # created in the branch picked in the header
+            branch = active_branch(self.context["request"], required=False)
+        code = attrs.get("code")
+        if code and branch and Till.objects.filter(branch=branch, code=code).exclude(pk=getattr(self.instance, "pk", None)).exists():
+            raise serializers.ValidationError({"code": "Another till at this branch uses this code."})
+        if branch:
+            from apps.accounts.models import Membership
+            for u in attrs.get("users", []):
+                ok = Membership.objects.filter(user=u, is_active=True, branch=branch).exists() or \
+                    Membership.objects.filter(user=u, is_active=True, branch__isnull=True,
+                                              role__organization=branch.organization).exists()
+                if not ok:
+                    raise serializers.ValidationError({"users": f"{u.get_full_name() or u.username} doesn't work at {branch.name}."})
+        return attrs
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
@@ -179,10 +212,36 @@ class BranchViewSet(viewsets.ModelViewSet):
 
 
 class TillViewSet(BranchScopedViewSet):
-    queryset = Till.objects.select_related("branch")
+    """Admins create tills and choose who may open each one. Tills with history are switched off, not deleted."""
+
+    queryset = Till.objects.select_related("branch").prefetch_related("users")
     serializer_class = TillSerializer
-    perms = {"list": "pos.sell", "create": "branch.admin", "update": "branch.admin",
-             "partial_update": "branch.admin", "destroy": "branch.admin"}
+    http_method_names = ["get", "post", "patch"]
+    perms = {"list": "pos.sell", "retrieve": "pos.sell", "create": "branch.admin", "update": "branch.admin",
+             "partial_update": "branch.admin"}
+    search_fields = ["name", "code"]
+    ordering_fields = ["name", "code"]
+    ordering = ["name"]
+
+    def get_queryset(self):
+        # Admins managing tills need them even without pos.sell; sellers see their branch's tills.
+        from django.db.models import Q
+        u = self.request.user
+        ids = {b.pk for b in branches_with(u, "pos.sell")} | {b.pk for b in branches_with(u, "branch.admin")}
+        qs = Till.objects.filter(branch__in=ids).select_related("branch").prefetch_related("users")
+        selected = active_branch(self.request, required=False)
+        if selected:
+            qs = qs.filter(branch=selected)
+        return qs.order_by("branch__name", "name")
+
+    def perform_update(self, serializer):
+        require_perm(self.request.user, serializer.instance.branch, "branch.admin")
+        before = set(serializer.instance.users.values_list("pk", flat=True))
+        t = serializer.save()
+        after = set(t.users.values_list("pk", flat=True))
+        if before != after or "is_active" in serializer.validated_data:
+            audit("till.updated", organization=t.branch.organization, branch=t.branch, actor=self.request.user,
+                  obj=t, added=sorted(after - before), removed=sorted(before - after), active=t.is_active)
 
 
 class AuditLogViewSet(BranchScopedViewSet):
@@ -191,3 +250,5 @@ class AuditLogViewSet(BranchScopedViewSet):
     http_method_names = ["get"]
     perms = {"*": "audit.view"}
     filterset_fields = ["action", "actor", "object_type"]
+    search_fields = ["action", "object_type", "object_id", "actor__username", "actor__first_name", "actor__last_name"]
+    ordering_fields = ["created_at", "action"]

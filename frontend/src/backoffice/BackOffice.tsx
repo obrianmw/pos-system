@@ -1,17 +1,25 @@
 import { useEffect, useState } from "react";
 import {
-  ArrowLeftRight, BadgeCheck, Boxes, Building2, CalendarDays, LayoutDashboard, LogOut, Mail, Menu, Package, Receipt,
-  ScrollText, ShoppingCart, Truck, Users as UsersIcon, Wallet, BookOpenCheck, UserCog,
+  ArrowLeftRight, Palette, BadgeCheck, Boxes, Building2, CalendarDays, LayoutDashboard, LogOut, Mail, Menu, Package, Receipt,
+  ScrollText, ShoppingCart, Truck, Users as UsersIcon, Wallet, BookOpenCheck, UserCog, Monitor, Vault, ClipboardCheck, Activity,
 } from "lucide-react";
 import type { Me } from "../App";
 import Dashboard from "./Dashboard";
-import { Approvals, AuditLog, Expenses, Leave, Sales, Stock, TrialBalance, Users } from "./pages";
+import { Approvals, AuditLog, Expenses, Leave, Sales, Stock, TrialBalance } from "./pages";
+import { Users } from "./users";
 import { Employees } from "./hr";
 import { Transfers } from "./transfers";
 import { Products, PurchaseOrders } from "./catalog";
 import { Messages, PinnedBanner, useInboxSummary } from "./messages";
+import { Branding } from "./branding";
+import { Tills, VaultPage } from "./cashdesk";
+import { StockTakes } from "../stocktake";
+import { SystemDashboard } from "./system";
 import { initials } from "./ui";
 import { ErrorBoundary, ErrorCard } from "../ErrorCard";
+import { BrandMark, useBrandingState } from "../BrandMark";
+import { ThemeSwitch } from "../theme";
+import { SystemTabs } from "../SystemTabs";
 
 export type Ctx = { me: Me; branch: string | null; can: (perm: string) => boolean; canOrg: (perm: string) => boolean };
 
@@ -25,16 +33,24 @@ export const PAGES: Page[] = [
   { key: "sales", label: "Sales", group: "Shop", icon: <Receipt {...I} />, show: (c) => c.can("pos.view_all_sales") || c.can("accounting.view"), el: (c) => <Sales ctx={c} /> },
   { key: "approvals", label: "Approvals", group: "Shop", icon: <BadgeCheck {...I} />, show: (c) => c.can("pos.price_override"), el: (c) => <Approvals ctx={c} /> },
   { key: "stock", label: "Stock", group: "Shop", icon: <Boxes {...I} />, show: (c) => c.can("inventory.view"), el: (c) => <Stock ctx={c} /> },
+  { key: "stock-takes", label: "Stock takes", group: "Shop", icon: <ClipboardCheck {...I} />,
+    show: (c) => c.can("inventory.count") || c.can("inventory.verify") || c.can("inventory.adjust"), el: (c) => <StockTakes ctx={c} /> },
   { key: "products", label: "Products", group: "Shop", icon: <Package {...I} />, show: (c) => c.can("catalog.manage"), el: (c) => <Products ctx={c} /> },
   { key: "purchase-orders", label: "Purchase orders", group: "Shop", icon: <Truck {...I} />,
     show: (c) => c.can("purchasing.manage") || c.can("inventory.receive"), el: (c) => <PurchaseOrders ctx={c} /> },
   { key: "transfers", label: "Transfers", group: "Shop", icon: <ArrowLeftRight {...I} />, show: (c) => c.can("inventory.transfer"), el: (c) => <Transfers ctx={c} /> },
+  { key: "vault", label: "Vault & cash", group: "Cash", icon: <Vault {...I} />,
+    show: (c) => c.can("branch.admin") || c.can("vault.operate") || c.can("accounting.view"), el: (c) => <VaultPage ctx={c} /> },
+  { key: "tills", label: "Tills", group: "Cash", icon: <Monitor {...I} />, show: (c) => c.can("branch.admin"), el: (c) => <Tills ctx={c} /> },
   { key: "expenses", label: "Expenses", group: "Accounting", icon: <Wallet {...I} />, show: (c) => c.can("accounting.view"), el: (c) => <Expenses ctx={c} /> },
   { key: "trial-balance", label: "Trial balance", group: "Accounting", icon: <BookOpenCheck {...I} />, show: (c) => c.can("accounting.view"), el: (c) => <TrialBalance ctx={c} /> },
   { key: "employees", label: "Employees", group: "HR", icon: <UsersIcon {...I} />, show: (c) => c.can("hr.view"), el: (c) => <Employees ctx={c} /> },
   { key: "leave", label: "Leave", group: "HR", icon: <CalendarDays {...I} />, show: (c) => c.can("hr.view"), el: (c) => <Leave ctx={c} /> },
+  { key: "system", label: "System", group: "Admin", icon: <Activity {...I} />,
+    show: (c) => c.canOrg("org.admin") || c.can("branch.admin"), el: (c) => <SystemDashboard ctx={c} /> },
   { key: "users", label: "Users & roles", group: "Admin", icon: <UserCog {...I} />, show: (c) => c.can("branch.admin"), el: (c) => <Users ctx={c} /> },
   { key: "audit", label: "Audit log", group: "Admin", icon: <ScrollText {...I} />, show: (c) => c.can("audit.view"), el: (c) => <AuditLog ctx={c} /> },
+  { key: "branding", label: "Branding", group: "Admin", icon: <Palette {...I} />, show: (c) => c.canOrg("org.admin"), el: (c) => <Branding ctx={c} /> },
 ];
 
 /** Someone "has a back office" if any management page is open to them (everyone has Messages). */
@@ -59,6 +75,7 @@ export default function BackOffice({ me, onLogout, onPos }: { me: Me; onLogout: 
   const [branch, setBranch] = useState<string | null>(() => { try { return localStorage.getItem("office.branch"); } catch { return null; } });
   const [navOpen, setNavOpen] = useState(false);
   const inbox = useInboxSummary();
+  const brand = useBrandingState();
   const ctx = makeCtx(me, branch);
   const visible = PAGES.filter((p) => p.show(ctx));
   const allowed = visible.find((p) => p.key === page);
@@ -85,8 +102,8 @@ export default function BackOffice({ me, onLogout, onPos }: { me: Me; onLogout: 
     <div className={`office ${navOpen ? "nav-open" : ""}`}>
       <aside onClick={(e) => e.target === e.currentTarget && setNavOpen(false)}>
         <div className="brand">
-          <span className="logo-mark"><ShoppingCart size={18} /></span>
-          <span><b>{me.organization_name || "POS System"}</b><small>Back office</small></span>
+          <BrandMark size={34} />
+          <span><b>{brand?.name || me.organization_name || "POS System"}</b><small>Back office</small></span>
         </div>
         {groups.map((g) => (
           <nav key={g} aria-label={g}>
@@ -116,10 +133,11 @@ export default function BackOffice({ me, onLogout, onPos }: { me: Me; onLogout: 
               </select>
             </label>
           ) : <span className="muted">{me.branches[0]?.name}</span>}
-          {onPos && <button onClick={onPos}><ShoppingCart size={16} />Open POS</button>}
+          <SystemTabs me={me} current="office" />
           <button className="ghost icon bell" aria-label={`Messages, ${inbox.unread} unread`} onClick={() => go("messages")}>
             <Mail size={19} />{inbox.unread > 0 && <span className="count">{inbox.unread > 99 ? "99+" : inbox.unread}</span>}
           </button>
+          <ThemeSwitch compact />
           <span className="user-chip"><span className="avatar">{initials(me.name)}</span><span>{me.name}</span></span>
           <button className="ghost icon" aria-label="Log out" title="Log out" onClick={onLogout}><LogOut size={18} /></button>
         </header>

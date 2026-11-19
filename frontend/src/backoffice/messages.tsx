@@ -7,6 +7,7 @@ import {
 import { api } from "../api";
 import type { Ctx } from "./BackOffice";
 import { errorText, initials, toast } from "./ui";
+import { confirmDialog } from "../Dialog";
 
 export type Summary = { unread: number; can_send: boolean; can_broadcast: boolean; pinned: any[]; reload: () => void };
 
@@ -470,7 +471,8 @@ function GroupForm({ group, onClose, onSaved }: { group: any | null; me: number;
     } catch (e) { toast(errorText(e), "error"); }
   }
   async function remove() {
-    if (!confirm(`Delete the group "${group.name}"? Messages already sent are not affected.`)) return;
+    if (!(await confirmDialog({ title: `Delete the group "${group.name}"?`, danger: true,
+      message: "Messages already sent are not affected." }))) return;
     try { await api(`/comms/groups/${group.id}/`, { method: "DELETE", branch: null }); toast("Group deleted.", "success"); onSaved(); }
     catch (e) { toast(errorText(e), "error"); }
   }

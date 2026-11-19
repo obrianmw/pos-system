@@ -61,7 +61,7 @@ def test_branch_and_everyone_broadcast(demo, client_for):
     r = send(client_for("ll_admin"), audience={"branches": [demo["ll"].pk]}, kind="announcement")
     assert r.status_code == 201
     got = set(MessageRecipient.objects.filter(message_id=r.data["id"]).values_list("user__username", flat=True))
-    assert got == {"ll_super", "ll_cash1", "ll_store"}  # Lilongwe staff, not the sender, not Blantyre
+    assert got == {"ll_super", "ll_cash1", "ll_store", "ll_count", "ll_verify"}  # Lilongwe staff, not the sender, not Blantyre
     # Organization HR may broadcast to everyone.
     r = send(client_for("hr"), audience={"everyone": True}, kind="announcement", requires_ack=True)
     assert r.status_code == 201
@@ -115,7 +115,7 @@ def test_read_receipts_and_ack(demo, client_for):
 def test_preview_and_validation(demo, client_for):
     sup = client_for("ll_super")
     p = sup.post("/api/comms/preview/", {"audience": {"branches": [demo["ll"].pk]}}, format="json").data
-    assert p["count"] == 3
+    assert p["count"] == 5  # Lilongwe staff other than the sender
     assert send(sup, audience={}).status_code == 400
     assert send(sup, audience={"users": [uid("ll_cash1")]}, body="  ").status_code == 400
     assert send(sup, audience={"users": [999999]}).status_code == 400

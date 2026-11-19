@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, money } from "../api";
 import type { Ctx } from "./BackOffice";
+import { DateFilters, dateFilters, SortHeader, useListState } from "./listing";
 import { Err, Errors, QuickAdd, toErrors, useOptions } from "./ui";
 
 const TYPES: Record<string, string> = { permanent: "Permanent", contract: "Contract", casual: "Casual", intern: "Intern" };
@@ -16,6 +17,10 @@ export function Employees({ ctx }: { ctx: Ctx }) {
   const [tick, setTick] = useState(0);
   const [editing, setEditing] = useState<any | "new" | null>(null);
   const depts = useOptions("/hr/departments/?page_size=200");
+  const sorter = useListState({ sort: "name" });
+  const shown = rows && sorter.apply(rows, { sorts: {
+    number: (e: any) => e.employee_number, name: (e: any) => `${e.first_name} ${e.last_name}`, job: (e: any) => e.job_title,
+    branch: (e: any) => e.branch_name || "", dept: (e: any) => e.department_name || "", type: (e: any) => e.employment_type, status: (e: any) => e.status } });
   const canAdd = ctx.canOrg("hr.manage") || ctx.me.branches.some((b) => b.permissions.includes("hr.manage"));
 
   useEffect(() => {
@@ -39,6 +44,7 @@ export function Employees({ ctx }: { ctx: Ctx }) {
           <option value="">All departments</option>
           {depts.items.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
+        {rows && <span className="muted">{rows.length} people</span>}
         <span className="spacer" />
         {canAdd && <button className="primary" onClick={() => setEditing("new")}>+ New employee</button>}
       </div>
@@ -46,8 +52,11 @@ export function Employees({ ctx }: { ctx: Ctx }) {
       {rows && !rows.length && <p className="muted">No employees match.</p>}
       {!!rows?.length && (
         <table className="grid-table clickable">
-          <thead><tr><th>No.</th><th>Name</th><th>Job</th><th>Branch</th><th>Department</th><th>Type</th><th>Login</th><th>Status</th></tr></thead>
-          <tbody>{rows.map((e) => (
+          <thead><tr><SortHeader list={sorter} k="number">No.</SortHeader><SortHeader list={sorter} k="name">Name</SortHeader>
+            <SortHeader list={sorter} k="job">Job</SortHeader><SortHeader list={sorter} k="branch">Branch</SortHeader>
+            <SortHeader list={sorter} k="dept">Department</SortHeader><SortHeader list={sorter} k="type">Type</SortHeader><th>Login</th>
+            <SortHeader list={sorter} k="status">Status</SortHeader></tr></thead>
+          <tbody>{(shown || []).map((e) => (
             <tr key={e.id} tabIndex={0} onClick={() => setEditing(e)} onKeyDown={(k) => k.key === "Enter" && setEditing(e)}>
               <td>{e.employee_number}</td><td>{e.first_name} {e.last_name}</td><td>{e.job_title}</td>
               <td>{e.branch_name || "Head office"}</td><td>{e.department_name}</td><td>{TYPES[e.employment_type]}</td>

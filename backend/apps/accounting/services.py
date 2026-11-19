@@ -14,6 +14,9 @@ CENTS = Decimal("0.01")
 DEFAULT_CHART = [
     # code, name, type, system_key
     ("1000", "Cash on hand", "asset", "cash"),
+    ("1001", "Vault cash", "asset", "vault"),
+    ("1003", "Cash held by finance", "asset", "cash_with_finance"),
+    ("1004", "Cash in transit to vault", "asset", "cash_in_transit"),
     ("1010", "Bank", "asset", "bank"),
     ("1020", "Mobile money wallets", "asset", "mobile_money"),
     ("1030", "Card settlements receivable", "asset", "card_clearing"),

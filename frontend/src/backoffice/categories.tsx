@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, FolderPlus, ImagePlus, LayoutGrid, Pencil, T
 import { api, apiForm } from "../api";
 import { Thumb } from "../CategoryBrowser";
 import { errorText, toast } from "./ui";
+import { confirmDialog } from "../Dialog";
 
 export type TreeRow = { id: number; name: string; parent: number | null; path: string; image_url: string | null;
   sort_order: number; products: number; total_products: number };
@@ -133,7 +134,8 @@ function CategoryEditor({ rows, mode, row, parent, onClose, onSaved }: {
     } catch (e) { toast(errorText(e), "error"); } finally { setBusy(false); }
   }
   async function remove() {
-    if (!row || !confirm(`Delete the category "${row.name}"? This only works when it has no products and no subcategories.`)) return;
+    if (!row || !(await confirmDialog({ title: `Delete "${row.name}"?`, danger: true,
+      message: "This only works when the category has no products and no subcategories." }))) return;
     try { await api(`/categories/${row.id}/`, { method: "DELETE", branch: null }); toast("Category deleted.", "success"); onSaved(null); }
     catch (e) { toast(errorText(e), "error"); }
   }

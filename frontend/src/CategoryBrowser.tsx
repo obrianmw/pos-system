@@ -1,6 +1,7 @@
 // Till product browser: department tabs -> subcategory chips -> picture tiles.
 // Typing in the search box searches every category; an exact barcode/SKU match is added on Enter.
 import { useMemo, useState } from "react";
+import { matchesCode } from "./scanning";
 import { ChevronRight, LayoutGrid } from "lucide-react";
 import { money } from "./api";
 import type { Catalog, CatalogCategory, Product } from "./offline";
@@ -53,7 +54,7 @@ const byOrder = (a: CatalogCategory, b: CatalogCategory) => a.sort_order - b.sor
 export function searchProducts(catalog: Catalog | null, query: string): Product[] {
   if (!catalog || !query.trim()) return [];
   const raw = query.trim(), q = raw.toLowerCase();
-  const exact = catalog.products.filter((p) => p.barcode === raw || p.sku.toLowerCase() === q);
+  const exact = catalog.products.filter((p) => matchesCode(p, raw));
   const rest = catalog.products.filter((p) => !exact.includes(p) &&
     (p.name.toLowerCase().includes(q) || p.category_path?.toLowerCase().includes(q)));
   return [...exact, ...rest].slice(0, 30);

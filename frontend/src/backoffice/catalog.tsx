@@ -1,11 +1,15 @@
 // Products (category tree, pictures, create/edit, branch prices) and Purchase orders (create, receive, cancel).
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ImagePlus, LayoutGrid, List, Plus, X } from "lucide-react";
+import { ImagePlus, LayoutGrid, List, Plus, QrCode, X } from "lucide-react";
+import { printLabels } from "../labels";
+import { ScanButton, ScannerModal } from "../Scanner";
+import { useScannerInput } from "../scanning";
 import { api, apiForm, money } from "../api";
 import { Thumb } from "../CategoryBrowser";
 import { CategoryTree, sortedPaths, TreeRow, useCategoryTree } from "./categories";
 import { Err, Errors, margin, QuickAdd, toErrors, useOptions } from "./ui";
 import type { Ctx } from "./BackOffice";
+import { DateFilters, dateFilters, SortHeader, useListState } from "./listing";
 
 type Product = {
   id: number; sku: string; barcode: string; name: string; category: number | null; category_name: string;
@@ -28,6 +32,14 @@ export function Products({ ctx }: { ctx: Ctx }) {
   const [rows, setRows] = useState<Product[] | null>(null);
   const [count, setCount] = useState(0);
   const [editing, setEditing] = useState<Product | "new" | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const sorter = useListState({ sort: "name" });
+  const shownProducts = rows && sorter.apply(rows, {
+    filters: { stocked: (p: Product, v) => (v === "yes" ? p.track_stock : !p.track_stock), photo: (p: Product, v) => (v === "yes" ? !!p.image_url : !p.image_url) },
+    sorts: { name: (p: Product) => p.name, category: (p: Product) => p.category_path, cost: (p: Product) => Number(p.cost_price),
+             price: (p: Product) => Number(p.sell_price), margin: (p: Product) => (Number(p.sell_price) - Number(p.cost_price)) / (Number(p.sell_price) || 1),
+             tax: (p: Product) => p.tax_name, reorder: (p: Product) => Number(p.reorder_level) } });
+  useScannerInput(setSearch, !scanning && !editing);
   const tree = useCategoryTree();
   const canEdit = ctx.canOrg("catalog.manage");
 
@@ -53,19 +65,30 @@ export function Products({ ctx }: { ctx: Ctx }) {
           <select aria-label="Status" value={active} onChange={(e) => setActive(e.target.value)}>
             <option value="true">Active</option><option value="false">Inactive</option><option value="">All</option>
           </select>
+          <select aria-label="Stocked" value={sorter.state.filters.stocked || ""} onChange={(e) => sorter.setFilter("stocked", e.target.value)}>
+            <option value="">Stocked or not</option><option value="yes">Stock tracked</option><option value="no">Not stocked</option></select>
+          <select aria-label="Photo" value={sorter.state.filters.photo || ""} onChange={(e) => sorter.setFilter("photo", e.target.value)}>
+            <option value="">Any photo</option><option value="yes">With photo</option><option value="no">No photo</option></select>
+          {view === "grid" && <select aria-label="Sort products" value={sorter.state.sort} onChange={(e) => sorter.setSort(e.target.value)}>
+            <option value="name">Name A–Z</option><option value="-name">Name Z–A</option><option value="price">Price: low first</option>
+            <option value="-price">Price: high first</option><option value="-margin">Best margin</option><option value="category">Category</option></select>}
           <div className="seg" role="group" aria-label="View">
             <button className={view === "grid" ? "on" : ""} aria-pressed={view === "grid"} onClick={() => pickView("grid")}><LayoutGrid size={14} />Grid</button>
             <button className={view === "list" ? "on" : ""} aria-pressed={view === "list"} onClick={() => pickView("list")}><List size={14} />List</button>
           </div>
+          <ScanButton onClick={() => setScanning(true)} />
+          {scanning && <ScannerModal onCode={setSearch} onClose={() => setScanning(false)} />}
           <span className="muted">{place ? `${place.path} · ` : ""}{count} products</span>
           <span className="spacer" />
+          <button disabled={!rows?.length} onClick={() => printLabels(rows || [], ctx.me.organization_name)}
+                  title="Print QR shelf labels for the products listed"><QrCode size={16} />QR labels</button>
           {canEdit && <button className="primary" onClick={() => setEditing("new")}><Plus size={16} />New product</button>}
         </div>
         {!canEdit && <p className="muted">Products are managed by head office. Click a product to set its price for your branch.</p>}
         {rows === null && <div className="tile-grid">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="skeleton" style={{ aspectRatio: ".8" }} />)}</div>}
         {rows && !rows.length && <p className="muted">No products {place ? `in ${place.path}` : "match"}.</p>}
         {!!rows?.length && view === "grid" && (
-          <div className="tile-grid">{rows.map((p) => (
+          <div className="tile-grid">{(shownProducts || []).map((p) => (
             <button key={p.id} type="button" className={`tile ${p.is_active ? "" : "out"}`} onClick={() => setEditing(p)} aria-label={`Open ${p.name}`}>
               <span className="tile-img"><Thumb src={p.image_url} name={p.name} />
                 {!p.is_active && <span className="stock-badge out">Inactive</span>}</span>
@@ -77,9 +100,11 @@ export function Products({ ctx }: { ctx: Ctx }) {
         )}
         {!!rows?.length && view === "list" && (
           <table className="grid-table clickable">
-            <thead><tr><th>Product</th><th>Category</th><th className="num">Cost</th><th className="num">Price</th>
-              <th className="num">Margin</th><th>Tax</th><th className="num">Reorder at</th><th /></tr></thead>
-            <tbody>{rows.map((p) => (
+            <thead><tr><SortHeader list={sorter} k="name">Product</SortHeader><SortHeader list={sorter} k="category">Category</SortHeader>
+              <SortHeader list={sorter} k="cost" num>Cost</SortHeader><SortHeader list={sorter} k="price" num>Price</SortHeader>
+              <SortHeader list={sorter} k="margin" num>Margin</SortHeader><SortHeader list={sorter} k="tax">Tax</SortHeader>
+              <SortHeader list={sorter} k="reorder" num>Reorder at</SortHeader><th /></tr></thead>
+            <tbody>{(shownProducts || []).map((p) => (
               <tr key={p.id} tabIndex={0} onClick={() => setEditing(p)} onKeyDown={(e) => e.key === "Enter" && setEditing(p)}>
                 <td><span className="name-cell"><span className="row-thumb"><Thumb src={p.image_url} name={p.name} /></span>
                   <span><b>{p.name}</b><br /><small className="muted">{p.sku}</small>{!p.track_stock && <span className="tag">not stocked</span>}</span></span></td>
@@ -270,9 +295,14 @@ export function PurchaseOrders({ ctx }: { ctx: Ctx }) {
   const [open, setOpen] = useState<any>(null);
   const [creating, setCreating] = useState(false);
   const branchName = (id: number) => ctx.me.branches.find((b) => b.id === id)?.name || `#${id}`;
+  const sorter = useListState({ sort: "-created_at" });
+  const shownPOs = rows && sorter.apply(rows, {
+    filters: dateFilters((o: any) => o.created_at),
+    sorts: { number: (o: any) => o.number, created_at: (o: any) => o.created_at, supplier: (o: any) => o.supplier_name, expected: (o: any) => o.expected_date || "",
+             status: (o: any) => o.status, total: (o: any) => Number(o.total), branch: (o: any) => branchName(o.branch) } });
 
   useEffect(() => {
-    const q = new URLSearchParams({ ordering: "-created_at" });
+    const q = new URLSearchParams({ ordering: "-created_at", page_size: "200" });
     if (status) q.set("status", status);
     if (search) q.set("search", search);
     api(`/purchase-orders/?${q}`, { branch: ctx.branch }).then((d) => setRows(d.results)).catch((e) => setError(e.message));
@@ -286,6 +316,7 @@ export function PurchaseOrders({ ctx }: { ctx: Ctx }) {
           <option value="">All statuses</option>
           {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
+        <DateFilters list={sorter} />
         <span className="spacer" />
         {ctx.can("purchasing.manage") && <button className="primary" onClick={() => setCreating(true)}>+ New purchase order</button>}
       </div>
@@ -293,9 +324,11 @@ export function PurchaseOrders({ ctx }: { ctx: Ctx }) {
       {rows && !rows.length && <p className="muted">No purchase orders yet.</p>}
       {!!rows?.length && (
         <table className="grid-table clickable">
-          <thead><tr><th>PO</th><th>Created</th>{!ctx.branch && <th>Branch</th>}<th>Supplier</th><th>Expected</th>
-            <th>Status</th><th className="num">Total</th></tr></thead>
-          <tbody>{rows.map((o) => (
+          <thead><tr><SortHeader list={sorter} k="number">PO</SortHeader><SortHeader list={sorter} k="created_at">Created</SortHeader>
+            {!ctx.branch && <SortHeader list={sorter} k="branch">Branch</SortHeader>}<SortHeader list={sorter} k="supplier">Supplier</SortHeader>
+            <SortHeader list={sorter} k="expected">Expected</SortHeader><SortHeader list={sorter} k="status">Status</SortHeader>
+            <SortHeader list={sorter} k="total" num>Total</SortHeader></tr></thead>
+          <tbody>{(shownPOs || []).map((o) => (
             <tr key={o.id} tabIndex={0} onClick={() => setOpen(o)} onKeyDown={(e) => e.key === "Enter" && setOpen(o)}>
               <td>{o.number}</td><td>{new Date(o.created_at).toLocaleDateString()}</td>
               {!ctx.branch && <td>{branchName(o.branch)}</td>}

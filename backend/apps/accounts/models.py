@@ -14,6 +14,8 @@ class User(AbstractUser):
     phone = models.CharField(max_length=30, blank=True)
     # Short numeric PIN supervisors type at the counter to approve overrides. Stored hashed.
     supervisor_pin = models.CharField(max_length=128, blank=True)
+    THEMES = [("system", "Follow device"), ("light", "Light"), ("dark", "Dark")]
+    ui_theme = models.CharField(max_length=10, choices=THEMES, default="system")
 
     def set_supervisor_pin(self, pin: str):
         if not (pin.isdigit() and 4 <= len(pin) <= 8):
@@ -31,8 +33,17 @@ class User(AbstractUser):
             )
         return self._membership_cache
 
+    def custody_branch_ids(self):
+        """Branches whose vault this user holds right now (cached for the request)."""
+        if not hasattr(self, "_custody_cache"):
+            from apps.cash.models import VaultCustody
+            self._custody_cache = set(VaultCustody.active().filter(custodian=self)
+                                      .values_list("vault__branch_id", flat=True))
+        return self._custody_cache
+
     def has_branch_perm(self, branch, code: str) -> bool:
-        """True if the user holds `code` at `branch`, through a branch or an org-wide membership."""
+        """True if the user holds `code` at `branch`, through a branch or an org-wide membership, or
+        because they hold that branch's vault today (vault holders are the branch's authorizers)."""
         if not self.is_active:
             return False
         if self.is_superuser:
@@ -41,6 +52,9 @@ class User(AbstractUser):
             branch = Branch.objects.filter(pk=branch).first()
             if branch is None:
                 return False
+        from .permissions_catalog import CUSTODIAN_PERMISSIONS
+        if code in CUSTODIAN_PERMISSIONS and branch.pk in self.custody_branch_ids():
+            return True
         for m in self._memberships():
             if m.branch_id is None:
                 if m.role.organization_id != branch.organization_id:

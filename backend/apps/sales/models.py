@@ -139,3 +139,28 @@ class OverrideApproval(TimeStamped):
 
     def __str__(self):
         return f"{self.get_kind_display()} {self.original_value}->{self.new_value} [{self.status}]"
+
+
+class Proforma(models.Model):
+    """A priced quotation printed before a sale (no stock or ledger effect). Lines are a snapshot of the
+    prices at the time, so a reprint shows exactly what the customer was given."""
+
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="proformas")
+    branch = models.ForeignKey(Branch, on_delete=models.PROTECT, related_name="proformas")
+    number = models.CharField(max_length=30, unique=True)
+    customer_name = models.CharField(max_length=200, blank=True)
+    customer_phone = models.CharField(max_length=30, blank=True)
+    note = models.CharField(max_length=255, blank=True)
+    lines = models.JSONField(default=list)
+    subtotal = models.DecimalField(max_digits=16, decimal_places=2, default=Decimal("0"))
+    tax_total = models.DecimalField(max_digits=16, decimal_places=2, default=Decimal("0"))
+    total = models.DecimalField(max_digits=16, decimal_places=2, default=Decimal("0"))
+    valid_until = models.DateField()
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.number

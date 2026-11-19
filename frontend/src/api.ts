@@ -43,9 +43,10 @@ export async function api<T = any>(path: string,
 }
 
 /** Multipart upload (photos). The browser sets the multipart Content-Type with its boundary itself. */
-export async function apiForm<T = any>(path: string, form: FormData, method = "PATCH"): Promise<T> {
+export async function apiForm<T = any>(path: string, form: FormData, method = "PATCH", branch?: string | null): Promise<T> {
   const headers: Record<string, string> = {};
   if (auth.token) headers.Authorization = `Bearer ${auth.token}`;
+  if (branch) headers["X-Branch-ID"] = branch;
   let res: Response;
   try {
     res = await fetch(`/api${path}`, { method, headers, body: form });
@@ -68,3 +69,15 @@ export const money = (v: number | string) =>
 
 /** Whole currency units for headline tiles (MWK amounts rarely need tambala at a glance). */
 export const whole = (v: number | string) => Math.round(Number(v)).toLocaleString("en-MW");
+
+/** Download a file from the API (signed in) and hand it to the browser to save. */
+export async function apiDownload(path: string, filename: string) {
+  const headers: Record<string, string> = {};
+  if (auth.token) headers.Authorization = `Bearer ${auth.token}`;
+  const res = await fetch(`/api${path}`, { headers });
+  if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
