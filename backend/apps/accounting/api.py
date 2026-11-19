@@ -110,6 +110,9 @@ class ExpenseViewSet(BranchScopedViewSet):
     serializer_class = ExpenseSerializer
     perms = {"*": "accounting.post", "list": "accounting.view", "approve": "accounting.reconcile",
              "reject": "accounting.reconcile"}
+    filterset_fields = ["status"]
+    search_fields = ["description", "receipt_number"]
+    ordering_fields = ["date", "amount", "status", "created_at"]
 
     def create_extra(self):
         return {"requested_by": self.request.user}

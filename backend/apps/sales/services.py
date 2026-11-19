@@ -119,26 +119,36 @@ def decide_override(approval, supervisor, approve: bool):
 # ---------------------------------------------------------------------------------------------
 # Till sessions
 # ---------------------------------------------------------------------------------------------
-def open_till(*, till, user, opening_float):
+def open_till(*, till, user, opening_float=0):
+    """Tills always open at zero; the vault holder then hands over a float (cash.services.move "float").
+    Only people the admin assigned to the till may open it, one person per till and one till per person."""
+    if q(opening_float or 0) != ZERO:
+        raise POSError("Tills open at zero. Ask the vault holder for a float once the till is open.")
     if not user.has_branch_perm(till.branch, "pos.open_till"):
         raise PermissionDenied("You cannot open a till at this branch.")
+    if not till.is_active:
+        raise POSError(f"{till.name} is switched off.")
+    if not till.users.filter(pk=user.pk).exists():
+        raise PermissionDenied(f"You are not assigned to {till.name}. Ask your branch admin.")
+    mine = TillSession.objects.filter(cashier=user, status="open").select_related("till").first()
+    if mine:
+        raise POSError(f"You already have {mine.till.name} open. Close it first.")
+    busy = TillSession.objects.filter(till=till, status="open").select_related("cashier").first()
+    if busy:
+        raise POSError(f"{till.name} is in use by {busy.cashier.get_full_name() or busy.cashier.username}.")
     try:
         with transaction.atomic():
-            session = TillSession.objects.create(till=till, branch=till.branch, cashier=user,
-                                                 opening_float=q(opening_float))
-    except IntegrityError:
-        raise POSError("This till already has an open session.")
-    audit("till.open", organization=till.branch.organization, branch=till.branch, actor=user, obj=session,
-          opening_float=str(session.opening_float))
+            session = TillSession.objects.create(till=till, branch=till.branch, cashier=user, opening_float=ZERO)
+    except IntegrityError:  # someone opened it at the same moment
+        raise POSError(f"{till.name} was just opened by someone else.")
+    audit("till.open", organization=till.branch.organization, branch=till.branch, actor=user, obj=session)
     return session
 
 
 def expected_cash(session) -> Decimal:
-    def cash_sum(kind):
-        return (Payment.objects.filter(sale__till_session=session, sale__kind=kind, status="confirmed",
-                                       method__kind="cash", sale__status="completed")
-                .aggregate(s=Sum("amount"))["s"] or ZERO)
-    return session.opening_float + cash_sum("sale") - cash_sum("refund")
+    """Cash that should be in the drawer: floats in, pickups out, cash sales in, cash refunds out."""
+    from apps.cash.services import till_balance
+    return till_balance(session)
 
 
 @transaction.atomic
@@ -151,15 +161,24 @@ def close_till(session, *, user, counted_cash, notes=""):
         raise PermissionDenied("Only the cashier or a supervisor/accountant can close this till.")
     if session.sales.filter(status="pending_payment").exists():
         raise POSError("Finish or cancel sales awaiting payment before closing.")
+    from apps.cash import services as cash
     session.expected_cash = expected_cash(session)
     session.counted_cash = q(counted_cash)
+    if session.counted_cash < 0:
+        raise POSError("Counted cash can't be negative.")
     session.variance = session.counted_cash - session.expected_cash
-    session.status, session.closed_at, session.closed_by, session.notes = "closed", timezone.now(), user, notes
-    session.save()
+    session.notes = notes
+    session.save(update_fields=["expected_cash", "counted_cash", "variance", "notes", "updated_at"])
     ledger.post_till_variance(session, user)
+    # Everything counted goes to the vault, so the till ends at zero.
+    if session.counted_cash > 0:
+        cash.move(branch=session.branch, kind="close", amount=session.counted_cash, by=user, session=session,
+                  note=f"Closing {session.till.name}", system=True)
+    session.status, session.closed_at, session.closed_by = "closed", timezone.now(), user
+    session.save(update_fields=["status", "closed_at", "closed_by", "updated_at"])
     audit("till.close", organization=session.branch.organization, branch=session.branch, actor=user,
           obj=session, expected=str(session.expected_cash), counted=str(session.counted_cash),
-          variance=str(session.variance))
+          variance=str(session.variance), to_vault=str(session.counted_cash))
     return session
 
 

@@ -177,7 +177,7 @@ def test_void_restores_stock_and_reverses_books(demo, open_session):
 
 
 def test_till_close_computes_variance(demo, open_session):
-    c, sid = open_session(opening_float="10000")
+    c, sid = open_session(float_amount="10000")  # float handed over from the vault
     c.post("/api/sales/", sale_body(demo, 2), format="json")  # +11000 cash
     r = c.post(f"/api/till-sessions/{sid}/close/", {"counted_cash": "20500"}, format="json")
     assert r.status_code == 200, r.data

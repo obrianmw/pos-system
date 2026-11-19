@@ -105,3 +105,55 @@ class StockTransferLine(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     quantity = models.DecimalField(max_digits=14, decimal_places=3)
     unit_cost = models.DecimalField(max_digits=14, decimal_places=4, default=Decimal("0"))
+
+
+class StockCount(TimeStamped):
+    """A stock take. Counters scan/enter what is on the shelf (often on phones), then a verifier who
+    didn't count checks the differences and approves; approval posts the adjustments."""
+
+    STATUS = [("counting", "Counting"), ("submitted", "Waiting for verification"), ("posted", "Verified & posted"),
+              ("cancelled", "Cancelled")]
+    branch = models.ForeignKey(Branch, on_delete=models.PROTECT, related_name="stock_counts")
+    number = models.CharField(max_length=20, unique=True)
+    title = models.CharField(max_length=120, blank=True)
+    category = models.ForeignKey("catalog.Category", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+                                 help_text="Optional: only this category (and its subcategories).")
+    blind = models.BooleanField(default=True, help_text="Counters don't see the system quantity.")
+    status = models.CharField(max_length=12, choices=STATUS, default="counting", db_index=True)
+    note = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.number
+
+
+class StockCountLine(models.Model):
+    count = models.ForeignKey(StockCount, on_delete=models.CASCADE, related_name="lines")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="+")
+    expected_qty = models.DecimalField(max_digits=14, decimal_places=3,
+                                       help_text="System quantity when first counted.")
+    counted_qty = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0"))
+    counted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    counted_at = models.DateTimeField(auto_now=True)
+    verified_qty = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True,
+                                       help_text="Verifier's recount, if different.")
+    movement = models.ForeignKey(StockMovement, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+
+    class Meta:
+        unique_together = [("count", "product")]
+        ordering = ["product__name"]
+
+    @property
+    def final_qty(self):
+        return self.verified_qty if self.verified_qty is not None else self.counted_qty
+
+    @property
+    def variance(self):
+        return self.final_qty - self.expected_qty

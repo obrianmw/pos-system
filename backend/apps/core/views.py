@@ -138,6 +138,8 @@ class FriendlyErrorMiddleware:
         if isinstance(exception, (Http404, PermissionDenied, SuspiciousOperation)):
             return None  # normal 4xx handling
         request._error_ref = new_ref()
+        from .system import record_server_error
+        record_server_error(request, request._error_ref)
         log.error("%s %s %s failed (reference %s)", request.method, request.path,
                   getattr(request.user, "username", "-") if hasattr(request, "user") else "-",
                   request._error_ref, exc_info=exception)

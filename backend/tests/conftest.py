@@ -45,11 +45,18 @@ def client_for():
 
 @pytest.fixture
 def open_session(demo, client_for):
-    def make(username="ll_cash1", till=None, opening_float="10000"):
+    def make(username="ll_cash1", till=None, float_amount="10000"):
+        """Open a till (always at zero) and, like the vault holder would, give it a float."""
         c = client_for(username, demo["ll"])
-        r = c.post("/api/till-sessions/", {"till": (till or demo["till"]).pk, "opening_float": opening_float},
+        r = c.post("/api/till-sessions/", {"till": (till or demo["till"]).pk},
                    format="json")
         assert r.status_code == 201, r.data
+        if float_amount:
+            from apps.cash import services as cash
+            from apps.sales.models import TillSession
+            s = TillSession.objects.get(pk=r.data["id"])
+            cash.move(branch=s.branch, kind="float", amount=float_amount, session=s,
+                      by=User.objects.get(username="ll_super"))
         return c, r.data["id"]
     return make
 

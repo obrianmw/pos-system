@@ -1,9 +1,16 @@
 import { errorText, toast } from "./ui";
-import { useEffect, useState } from "react";
+import { formDialog } from "../Dialog";
+import { useEffect, useRef, useState } from "react";
+import { FileText, Printer } from "lucide-react";
+import { useBrandingState } from "../BrandMark";
+import { Invoice, printDoc } from "../docs";
 import { api, money } from "../api";
 import type { Ctx } from "./BackOffice";
 import { Thumb } from "../CategoryBrowser";
 import { CategoryTree, useCategoryTree } from "./categories";
+import { ScanButton, ScannerModal } from "../Scanner";
+import { useScannerInput } from "../scanning";
+import { ListControls, SortHeader, useListState } from "./listing";
 
 // ---- shared bits ------------------------------------------------------------------------------
 const hashQuery = () => new URLSearchParams(location.hash.split("?")[1] || "");
@@ -43,22 +50,21 @@ async function act(path: string, body?: unknown, branch?: string | null) {
 
 // ---- Sales -------------------------------------------------------------------------------------
 export function Sales({ ctx }: { ctx: Ctx }) {
-  const [review, setReview] = useState(hashQuery().get("review") === "1");
-  const [search, setSearch] = useState("");
+  const list = useListState({ sort: "-created_at", filters: hashQuery().get("review") === "1" ? { needs_review: "true" } : {} });
   const [open, setOpen] = useState<any>(null);
-  const url = `/sales/?ordering=-created_at${review ? "&needs_review=true" : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}`;
-  const { rows, count, error, reload } = useList(url, ctx);
+  const { rows, count, error, reload } = useList(`/sales/?${list.query({ page_size: "100" })}`, ctx);
   return (
     <div>
-      <div className="toolbar">
-        <input placeholder="Receipt no. or customer" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <label><input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Needs review only</label>
-        <span className="muted">{count} sales</span>
-      </div>
-      <Status rows={rows} error={error} empty={review ? "No sales waiting for review." : "No sales yet."} />
+      <ListControls list={list} placeholder="Receipt no., customer or cashier" count={count} filters={[
+        { key: "status", label: "Status", options: [["", "Any status"], ["completed", "Completed"], ["pending_payment", "Awaiting payment"], ["voided", "Voided"], ["cancelled", "Cancelled"]] },
+        { key: "kind", label: "Type", options: [["", "Sales & refunds"], ["sale", "Sales"], ["refund", "Refunds"]] },
+        { key: "needs_review", label: "Review", options: [["", "All"], ["true", "Needs review"]] }, { key: "from", label: "From", type: "date" }, { key: "to", label: "To", type: "date" }]} />
+      <Status rows={rows} error={error} empty="No sales match." />
       {!!rows?.length && (
         <table className="grid-table clickable">
-          <thead><tr><th>Receipt</th><th>Time</th>{!ctx.branch && <th>Branch</th>}<th>Cashier</th><th>Type</th><th>Status</th><th className="num">Total</th></tr></thead>
+          <thead><tr><SortHeader list={list} k="number">Receipt</SortHeader><SortHeader list={list} k="created_at">Time</SortHeader>
+            {!ctx.branch && <th>Branch</th>}<th>Cashier</th><SortHeader list={list} k="kind">Type</SortHeader>
+            <SortHeader list={list} k="status">Status</SortHeader><SortHeader list={list} k="total" num>Total</SortHeader></tr></thead>
           <tbody>{rows.map((s) => (
             <tr key={s.id} onClick={() => setOpen(s)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setOpen(s)}>
               <td>{s.number} {s.created_offline && <span className="tag">offline</span>} {s.needs_review && <span className="tag warn">⚠ review</span>}</td>
@@ -70,13 +76,28 @@ export function Sales({ ctx }: { ctx: Ctx }) {
           ))}</tbody>
         </table>
       )}
-      {open && <SaleDetail sale={open} onClose={() => setOpen(null)} onChanged={() => { setOpen(null); reload(); }} />}
+      {count > (rows?.length || 0) && <p className="muted">Showing the first {rows?.length} of {count}. Narrow the dates or search to see others.</p>}
+      {open && <SaleDetail sale={open} branchName={branchName(ctx, open.branch)} onClose={() => setOpen(null)} onChanged={() => { setOpen(null); reload(); }} />}
     </div>
   );
 }
 
-function SaleDetail({ sale, onClose, onChanged }: { sale: any; onClose: () => void; onChanged: () => void }) {
+function SaleDetail({ sale, onClose, onChanged, branchName }: { sale: any; onClose: () => void; onChanged: () => void; branchName?: string }) {
   const [note, setNote] = useState("");
+  const [invoice, setInvoice] = useState(false);
+  const brand = useBrandingState();
+  const box = useRef<HTMLDivElement>(null);
+  if (invoice) {
+    return (
+      <div className="modal" onClick={(e) => e.target === e.currentTarget && setInvoice(false)}><div className="card wide">
+        <div ref={box} className="doc-preview"><Invoice s={(brand || {}) as any} sale={sale} branch={branchName || ""} /></div>
+        <div className="actions">
+          <button className="primary" onClick={() => printDoc(box.current)}><Printer size={16} />Print invoice</button>
+          <button onClick={() => setInvoice(false)}>Back to sale</button>
+        </div>
+      </div></div>
+    );
+  }
   return (
     <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}><div className="card wide">
       <h3>{sale.kind === "refund" ? "Refund" : "Sale"} {sale.number}</h3>
@@ -100,28 +121,32 @@ function SaleDetail({ sale, onClose, onChanged }: { sale: any; onClose: () => vo
           <button className="primary" disabled={!note} onClick={async () => (await act(`/sales/${sale.id}/mark_reviewed/`, { note }, null)) && onChanged()}>Mark reviewed</button>
         </div>
       )}
-      <button className="link" onClick={onClose}>Close</button>
+      <div className="actions">
+        {sale.kind === "sale" && sale.status === "completed" &&
+          <button className="primary" onClick={() => setInvoice(true)}><FileText size={16} />Invoice</button>}
+        <button className="link" onClick={onClose}>Close</button>
+      </div>
     </div></div>
   );
 }
 
 // ---- Approvals ---------------------------------------------------------------------------------
 export function Approvals({ ctx }: { ctx: Ctx }) {
-  const [status, setStatus] = useState("pending");
-  const { rows, error, reload } = useList(`/overrides/?status=${status}&ordering=-created_at`, ctx, []);
+  const list = useListState({ sort: "-created_at", filters: { status: "pending" } });
+  const { rows, error, reload } = useList(`/overrides/?${list.query({ page_size: "100" })}`, ctx, []);
+  const status = list.state.filters.status;
   useEffect(() => { if (status !== "pending") return; const id = setInterval(reload, 5000); return () => clearInterval(id); }, [status]);
   return (
     <div>
-      <div className="toolbar">
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          {["pending", "used", "approved", "rejected"].map((s) => <option key={s}>{s}</option>)}
-        </select>
-        {status === "pending" && <span className="muted">Refreshes every 5 seconds</span>}
-      </div>
+      <ListControls list={list} placeholder="Search item or reason" filters={[
+        { key: "status", label: "Status", options: [["pending", "Pending"], ["approved", "Approved"], ["used", "Used"], ["rejected", "Rejected"], ["", "All"]] },
+        { key: "kind", label: "Type", options: [["", "All types"], ["price", "Price change"], ["discount", "Discount"], ["void", "Void"], ["refund", "Refund"]] }, { key: "from", label: "From", type: "date" }, { key: "to", label: "To", type: "date" }]}
+        right={status === "pending" && <span className="muted">Refreshes every 5 seconds</span>} />
       <Status rows={rows} error={error} empty="Nothing here." />
       {!!rows?.length && (
         <table className="grid-table">
-          <thead><tr><th>When</th>{!ctx.branch && <th>Branch</th>}<th>Type</th><th>Item</th><th className="num">From</th><th className="num">To</th><th>Asked by</th><th>Reason</th><th>How</th><th /></tr></thead>
+          <thead><tr><SortHeader list={list} k="created_at">When</SortHeader>{!ctx.branch && <th>Branch</th>}<SortHeader list={list} k="kind">Type</SortHeader>
+            <th>Item</th><th className="num">From</th><th className="num">To</th><th>Asked by</th><th>Reason</th><th>How</th><th /></tr></thead>
           <tbody>{rows.map((a) => (
             <tr key={a.id}>
               <td>{when(a.created_at)}</td>{!ctx.branch && <td>{branchName(ctx, a.branch)}</td>}
@@ -143,20 +168,36 @@ export function Approvals({ ctx }: { ctx: Ctx }) {
 // ---- Stock -------------------------------------------------------------------------------------
 export function Stock({ ctx }: { ctx: Ctx }) {
   const [low, setLow] = useState(hashQuery().get("low") === "1");
+  const [scanning, setScanning] = useState(false);
   const [search, setSearch] = useState("");
+  useScannerInput(setSearch, !scanning);
   const [category, setCategory] = useState<number | null>(null);
   const tree = useCategoryTree();
   const cat = category !== null ? `category_tree=${category}` : "";
   const url = low ? `/stock-levels/low/${cat ? `?${cat}` : ""}`
     : `/stock-levels/?ordering=product__name&page_size=200${search ? `&search=${encodeURIComponent(search)}` : ""}${cat ? `&${cat}` : ""}`;
   const { rows, error, reload } = useList(url, ctx);
-  const shown = low && search ? rows?.filter((r: any) => r.product_name.toLowerCase().includes(search.toLowerCase())) ?? null : rows;
+  const sorter = useListState({ sort: "product_name" });
+  const base = low && search ? rows?.filter((r: any) => r.product_name.toLowerCase().includes(search.toLowerCase())) ?? null : rows;
+  const shown = base && sorter.apply(base as any[], {
+    filters: { level: (r: any, v) => (v === "out" ? Number(r.quantity) <= 0 : v === "low" ? Number(r.quantity) <= Number(r.reorder_level) : Number(r.quantity) > Number(r.reorder_level)) },
+    sorts: { product_name: (r: any) => r.product_name, category: (r: any) => r.category_path, qty: (r: any) => Number(r.quantity),
+             reorder: (r: any) => Number(r.reorder_level), cost: (r: any) => Number(r.avg_cost), value: (r: any) => Number(r.quantity) * Number(r.avg_cost),
+             branch: (r: any) => branchName(ctx, r.branch) },
+  });
   async function adjust(r: any) {
-    const counted = prompt(`Counted quantity of ${r.product_name} at ${branchName(ctx, r.branch)}:`, String(Number(r.quantity)));
-    if (counted == null) return;
-    const reason = prompt("Reason (stock take, breakage, expiry…):");
-    if (!reason) return;
-    if (await act("/inventory/adjust/", { product: r.product, counted_quantity: counted, reason }, String(r.branch))) reload();
+    const v = await formDialog({
+      title: `Adjust ${r.product_name}`, confirmLabel: "Save count",
+      message: `${branchName(ctx, r.branch)} · the system shows ${Number(r.quantity)} ${r.unit || "in stock"}.`,
+      fields: [
+        { name: "counted", label: "Counted quantity", type: "number", value: String(Number(r.quantity)), required: true,
+          validate: (x) => (isFinite(Number(x)) && Number(x) >= 0 ? null : "Enter a number, 0 or more.") },
+        { name: "reason", label: "Reason", placeholder: "Stock take, breakage, expiry…", required: true,
+          hint: "Recorded in the audit log and the stock history." },
+      ],
+    });
+    if (!v) return;
+    if (await act("/inventory/adjust/", { product: r.product, counted_quantity: v.counted, reason: v.reason }, String(r.branch))) reload();
   }
   const canAdjust = (branch: number) => ctx.me.org_permissions.includes("inventory.adjust") ||
     !!ctx.me.branches.find((b) => b.id === branch)?.permissions.includes("inventory.adjust");
@@ -166,14 +207,23 @@ export function Stock({ ctx }: { ctx: Ctx }) {
       <CategoryTree rows={tree.rows} selected={category} onSelect={setCategory} allLabel="All stock" />
       <div style={{ minWidth: 0 }}>
       <div className="toolbar">
-        <input type="search" placeholder="Search product" aria-label="Search stock" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <input type="search" placeholder="Search product, SKU or barcode" aria-label="Search stock" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <ScanButton onClick={() => setScanning(true)} />
+        <a href="#/count" className="muted" style={{ fontSize: ".85rem" }}>Phone mode</a>
+        {scanning && <ScannerModal onCode={setSearch} onClose={() => setScanning(false)} />}
         <label><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> At or below reorder level</label>
+        <select aria-label="Stock level" value={sorter.state.filters.level || ""} onChange={(e) => sorter.setFilter("level", e.target.value)}>
+          <option value="">Any level</option><option value="out">Out of stock</option><option value="low">Low</option><option value="ok">Healthy</option></select>
+        {shown && <span className="muted">{shown.length} items</span>}
         {place && <span className="muted">{place.path}</span>}
       </div>
       <Status rows={shown} error={error} empty={low ? "Nothing is low. 👍" : place ? `No stock records in ${place.path}.` : "No stock records."} />
       {!!shown?.length && (
         <table className="grid-table">
-          <thead><tr><th>Product</th><th>Category</th>{!ctx.branch && <th>Branch</th>}<th className="num">On hand</th><th className="num">Reorder at</th><th className="num">Avg cost</th><th className="num">Value</th><th /></tr></thead>
+          <thead><tr><SortHeader list={sorter} k="product_name">Product</SortHeader><SortHeader list={sorter} k="category">Category</SortHeader>
+            {!ctx.branch && <SortHeader list={sorter} k="branch">Branch</SortHeader>}<SortHeader list={sorter} k="qty" num>On hand</SortHeader>
+            <SortHeader list={sorter} k="reorder" num>Reorder at</SortHeader><SortHeader list={sorter} k="cost" num>Avg cost</SortHeader>
+            <SortHeader list={sorter} k="value" num>Value</SortHeader><th /></tr></thead>
           <tbody>{shown.map((r: any) => {
             const isLow = Number(r.quantity) <= Number(r.reorder_level);
             return (
@@ -197,23 +247,21 @@ export function Stock({ ctx }: { ctx: Ctx }) {
 
 // ---- Accounting --------------------------------------------------------------------------------
 export function Expenses({ ctx }: { ctx: Ctx }) {
-  const [status, setStatus] = useState("pending");
-  const { rows, error, reload } = useList(`/accounting/expenses/?ordering=-date${status ? `&status=${status}` : ""}`, ctx);
+  const list = useListState({ sort: "-date", filters: { status: "pending" } });
+  const { rows, count, error, reload } = useList(`/accounting/expenses/?${list.query({ page_size: "100" })}`, ctx);
   const [adding, setAdding] = useState(false);
   const canApprove = (branch: number) => ctx.me.org_permissions.includes("accounting.reconcile") ||
     !!ctx.me.branches.find((b) => b.id === branch)?.permissions.includes("accounting.reconcile");
   return (
     <div>
-      <div className="toolbar">
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="">All</option>
-        </select>
-        {ctx.can("accounting.post") && <button className="primary" onClick={() => setAdding(true)}>+ New expense</button>}
-      </div>
-      <Status rows={rows} error={error} empty="No expenses." />
+      <ListControls list={list} placeholder="Description or receipt no." count={count} filters={[
+        { key: "status", label: "Status", options: [["pending", "Pending"], ["approved", "Approved"], ["rejected", "Rejected"], ["", "All"]] }, { key: "from", label: "From", type: "date" }, { key: "to", label: "To", type: "date" }]}
+        right={ctx.can("accounting.post") && <button className="primary" onClick={() => setAdding(true)}>+ New expense</button>} />
+      <Status rows={rows} error={error} empty="No expenses match." />
       {!!rows?.length && (
         <table className="grid-table">
-          <thead><tr><th>Date</th>{!ctx.branch && <th>Branch</th>}<th>Description</th><th>Receipt</th><th className="num">Amount</th><th>Status</th><th /></tr></thead>
+          <thead><tr><SortHeader list={list} k="date">Date</SortHeader>{!ctx.branch && <th>Branch</th>}<th>Description</th><th>Receipt</th>
+            <SortHeader list={list} k="amount" num>Amount</SortHeader><SortHeader list={list} k="status">Status</SortHeader><th /></tr></thead>
           <tbody>{rows.map((x: any) => (
             <tr key={x.id}>
               <td>{x.date}</td>{!ctx.branch && <td>{branchName(ctx, x.branch)}</td>}<td>{x.description}</td><td>{x.receipt_number}</td>
@@ -275,15 +323,23 @@ export function TrialBalance({ ctx }: { ctx: Ctx }) {
       e.status === 403 && !ctx.branch ? "Whole-organization figures need an organization role. Pick a branch above." : e.message));
   }, [ctx.branch, dateTo]);
   const balanced = data && Number(data.total_debit).toFixed(2) === Number(data.total_credit).toFixed(2);
+  const list = useListState({ sort: "code" });
+  const tbRows = data ? list.apply(data.rows as any[], {
+    text: (r: any) => `${r.code} ${r.name}`, filters: { type: (r: any, v) => r.type === v },
+    sorts: { code: (r: any) => r.code, name: (r: any) => r.name, type: (r: any) => r.type, debit: (r: any) => Number(r.debit), credit: (r: any) => Number(r.credit) },
+  }) : [];
   return (
     <div>
       <div className="toolbar"><label>As at <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></label>
         {data && <span className={balanced ? "ok" : "error"}>{balanced ? "✓ Balanced" : "✕ Out of balance"}</span>}</div>
+      <ListControls list={list} placeholder="Search account" filters={[{ key: "type", label: "Type", options: [["", "All types"],
+        ["asset", "Assets"], ["liability", "Liabilities"], ["equity", "Equity"], ["income", "Income"], ["expense", "Expenses"]] }]} />
       {error && <p className="error">{error}</p>}
       {data && (
         <table className="grid-table">
-          <thead><tr><th>Code</th><th>Account</th><th>Type</th><th className="num">Debit</th><th className="num">Credit</th></tr></thead>
-          <tbody>{data.rows.map((r: any) => (
+          <thead><tr><SortHeader list={list} k="code">Code</SortHeader><SortHeader list={list} k="name">Account</SortHeader>
+            <SortHeader list={list} k="type">Type</SortHeader><SortHeader list={list} k="debit" num>Debit</SortHeader><SortHeader list={list} k="credit" num>Credit</SortHeader></tr></thead>
+          <tbody>{tbRows.map((r: any) => (
             <tr key={r.code}><td>{r.code}</td><td>{r.name}</td><td>{r.type}</td>
               <td className="num">{Number(r.debit) ? money(r.debit) : ""}</td><td className="num">{Number(r.credit) ? money(r.credit) : ""}</td></tr>
           ))}</tbody>
@@ -296,17 +352,17 @@ export function TrialBalance({ ctx }: { ctx: Ctx }) {
 
 // ---- HR ----------------------------------------------------------------------------------------
 export function Leave({ ctx }: { ctx: Ctx }) {
-  const [status, setStatus] = useState("pending");
-  const { rows, error, reload } = useList(`/hr/leave/?ordering=-created_at${status ? `&status=${status}` : ""}`, { ...ctx, branch: null });
+  const list = useListState({ sort: "-created_at", filters: { status: "pending" } });
+  const { rows, error, reload } = useList(`/hr/leave/?${list.query({ page_size: "100" })}`, { ...ctx, branch: null });
   return (
     <div>
-      <div className="toolbar"><select value={status} onChange={(e) => setStatus(e.target.value)}>
-        <option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="">All</option>
-      </select></div>
-      <Status rows={rows} error={error} empty="No leave requests." />
+      <ListControls list={list} placeholder="Search employee or reason" filters={[
+        { key: "status", label: "Status", options: [["pending", "Pending"], ["approved", "Approved"], ["rejected", "Rejected"], ["", "All"]] }, { key: "from", label: "From", type: "date" }, { key: "to", label: "To", type: "date" }]} />
+      <Status rows={rows} error={error} empty="No leave requests match." />
       {!!rows?.length && (
         <table className="grid-table">
-          <thead><tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th className="num">Days</th><th>Reason</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Employee</th><th>Type</th><SortHeader list={list} k="start_date">From</SortHeader><SortHeader list={list} k="end_date">To</SortHeader>
+            <th className="num">Days</th><th>Reason</th><SortHeader list={list} k="status">Status</SortHeader><th /></tr></thead>
           <tbody>{rows.map((l: any) => (
             <tr key={l.id}><td>{l.employee_name}</td><td>{l.leave_type}</td><td>{l.start_date}</td><td>{l.end_date}</td>
               <td className="num">{l.days}</td><td>{l.reason}</td><td>{l.status}</td>
@@ -322,81 +378,24 @@ export function Leave({ ctx }: { ctx: Ctx }) {
 }
 
 // ---- Admin -------------------------------------------------------------------------------------
-export function Users({ ctx }: { ctx: Ctx }) {
-  const [search, setSearch] = useState("");
-  const { rows, error, reload } = useList(`/users/?ordering=username${search ? `&search=${encodeURIComponent(search)}` : ""}`, { ...ctx, branch: null });
-  const [roles, setRoles] = useState<any[]>([]);
-  const [assign, setAssign] = useState<any>(null);
-  useEffect(() => { api("/roles/", { branch: null }).then((d) => setRoles(d.results || d)).catch(() => {}); }, []);
-  const roleName = (id: number) => roles.find((r) => r.id === id)?.name || `role ${id}`;
-  const shown = rows?.filter((u: any) => !ctx.branch || u.memberships.some((m: any) => !m.branch || String(m.branch) === ctx.branch)) ?? null;
-  return (
-    <div>
-      <div className="toolbar"><input placeholder="Search users" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <a href="/admin/accounts/user/add/" target="_blank" rel="noreferrer">+ Add user in admin</a></div>
-      <Status rows={shown} error={error} empty="No users." />
-      {!!shown?.length && (
-        <table className="grid-table">
-          <thead><tr><th>Username</th><th>Name</th><th>Roles</th><th>Active</th><th /></tr></thead>
-          <tbody>{shown.map((u: any) => (
-            <tr key={u.id}><td>{u.username}</td><td>{u.first_name} {u.last_name}</td>
-              <td>{u.memberships.filter((m: any) => m.is_active).map((m: any) => (
-                <span key={m.id} className="tag">{m.role_name || roleName(m.role)} @ {m.branch ? branchName(ctx, m.branch) : "all branches"}
-                  <button className="link" title="Remove role" onClick={async () => confirm(`Remove ${m.role_name} from ${u.username}?`) &&
-                    (await act(`/users/${u.id}/revoke_role/`, { membership_id: m.id }, null)) !== null && reload()}>✕</button></span>
-              ))}</td>
-              <td>{u.is_active ? "Yes" : "No"}</td>
-              <td><button className="link" onClick={() => setAssign(u)}>Add role</button></td></tr>
-          ))}</tbody>
-        </table>
-      )}
-      {assign && <AssignRole ctx={ctx} user={assign} roles={roles} onClose={() => setAssign(null)} onSaved={() => { setAssign(null); reload(); }} />}
-    </div>
-  );
-}
-
-function AssignRole({ ctx, user, roles, onClose, onSaved }: { ctx: Ctx; user: any; roles: any[]; onClose: () => void; onSaved: () => void }) {
-  const [role, setRole] = useState("");
-  const [branch, setBranch] = useState(ctx.branch || "");
-  const r = roles.find((x) => String(x.id) === role);
-  const adminBranches = ctx.me.branches.filter((b) => ctx.canOrg("org.admin") || b.permissions.includes("branch.admin"));
-  return (
-    <div className="modal"><div className="card">
-      <h3>Add role for {user.username}</h3>
-      <label>Role <select value={role} onChange={(e) => setRole(e.target.value)}>
-        <option value="">Choose…</option>
-        {roles.filter((x) => x.is_active && (x.scope === "branch" || ctx.canOrg("org.admin"))).map((x) =>
-          <option key={x.id} value={x.id}>{x.name} ({x.scope === "org" ? "all branches" : "one branch"})</option>)}
-      </select></label>
-      {r?.scope === "branch" && <label>Branch <select value={branch} onChange={(e) => setBranch(e.target.value)}>
-        <option value="">Choose…</option>{adminBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-      </select></label>}
-      {r && <p className="muted"><small>Can: {r.permissions.join(", ")}</small></p>}
-      <button className="primary" disabled={!r || (r.scope === "branch" && !branch)} onClick={async () =>
-        (await act(`/users/${user.id}/assign_role/`, { role: Number(role), branch: r.scope === "branch" ? Number(branch) : null }, null)) && onSaved()}>Assign</button>
-      <button className="link" onClick={onClose}>Cancel</button>
-    </div></div>
-  );
-}
-
 export function AuditLog({ ctx }: { ctx: Ctx }) {
-  const [action, setAction] = useState("");
-  const { rows, error } = useList(`/audit-logs/?ordering=-created_at${action ? `&action=${encodeURIComponent(action)}` : ""}`, ctx);
+  const list = useListState({ sort: "-created_at" });
+  const { rows, count, error } = useList(`/audit-logs/?${list.query({ page_size: "100" })}`, ctx);
   return (
     <div>
-      <div className="toolbar"><select value={action} onChange={(e) => setAction(e.target.value)}>
-        <option value="">All actions</option>
-        {["sale.created", "sale.voided", "sale.refund", "sale.reviewed", "override.pin_failed", "override.approved", "till.open", "till.close",
-          "inventory.adjust", "user.role_assigned", "user.role_revoked", "journal.manual", "cash.movement"].map((a) => <option key={a}>{a}</option>)}
-      </select></div>
-      <Status rows={rows} error={error} empty="No entries." />
+      <ListControls list={list} placeholder="Search action, person or object" count={count} filters={[
+        { key: "action", label: "Action", options: [["", "All actions"], ...["sale.created", "sale.voided", "sale.refund", "sale.reviewed",
+          "override.pin_failed", "auth.login_failed", "system.error", "till.open", "till.close", "cash.drop", "cash.confirmed", "vault.assigned",
+          "inventory.adjust", "stockcount.posted", "user.role_assigned", "user.role_revoked", "journal.manual"].map((a) => [a, a] as [string, string])] }, { key: "from", label: "From", type: "date" }, { key: "to", label: "To", type: "date" }]} />
+      <Status rows={rows} error={error} empty="No entries match." />
       {!!rows?.length && (
         <table className="grid-table">
-          <thead><tr><th>When</th><th>Who</th>{!ctx.branch && <th>Branch</th>}<th>Action</th><th>Details</th></tr></thead>
+          <thead><tr><SortHeader list={list} k="created_at">When</SortHeader><th>Who</th>{!ctx.branch && <th>Branch</th>}
+            <SortHeader list={list} k="action">Action</SortHeader><th>Details</th></tr></thead>
           <tbody>{rows.map((a: any) => (
             <tr key={a.id}><td>{when(a.created_at)}</td><td>{a.actor_name}</td>{!ctx.branch && <td>{a.branch ? branchName(ctx, a.branch) : ""}</td>}
-              <td>{a.action.includes("failed") ? <span className="tag warn">⚠ {a.action}</span> : a.action}</td>
-              <td className="details">{Object.entries(a.data || {}).map(([k, v]) => `${k}: ${v}`).join(" · ")}</td></tr>
+              <td>{a.action.includes("failed") || a.action === "system.error" ? <span className="tag warn">⚠ {a.action}</span> : a.action}</td>
+              <td className="details">{Object.entries(a.data || {}).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ").slice(0, 300)}</td></tr>
           ))}</tbody>
         </table>
       )}

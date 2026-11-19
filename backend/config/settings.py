@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "apps.sales",
     "apps.hr",
     "apps.comms",
+    "apps.cash",
 ]
 
 MIDDLEWARE = [
@@ -114,6 +115,7 @@ REST_FRAMEWORK = {
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
+        "apps.core.filters.DateRangeFilter",
     ],
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.Pagination",
     "PAGE_SIZE": 50,
@@ -122,6 +124,7 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=10),  # one shift
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "UPDATE_LAST_LOGIN": True,  # shows "last sign-in" on the Users page
 }
 
 CORS_ALLOWED_ORIGINS = [o for o in env("CORS_ALLOWED_ORIGINS", "http://localhost:5180").split(",") if o]
@@ -139,6 +142,9 @@ FRONTEND_URL = env("FRONTEND_URL", "http://localhost:5180/")
 # Security
 # The database admin site (/admin/) only answers on these networks (comma-separated CIDRs), e.g.
 # "127.0.0.1/32,::1/128,10.20.0.0/24". Everyone else gets 403 before any login page.
+# Where the POS / back office runs (the admin site's "View site" link). The server controller sets it.
+WEB_APP_URL = env("POS_WEB_URL", "http://localhost:5180/")
+API_PORT = int(env("POS_API_PORT", "8100"))  # where the database admin site (/admin/) answers
 ADMIN_ALLOWED_NETWORKS = env("ADMIN_ALLOWED_NETWORKS", "127.0.0.1/32,::1/128")
 # Set to 1 when Django runs behind exactly one reverse proxy (nginx) that sets X-Forwarded-For.
 TRUSTED_PROXY_COUNT = int(env("TRUSTED_PROXY_COUNT", "0"))

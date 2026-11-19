@@ -31,7 +31,7 @@ Built for **Aden Shop**: several branches, a till per counter, and a back office
 
 ## Turning it on and off
 
-Double-click **`server.cmd`** for the control window (Start, Stop, Restart, Open POS, Back office, Change password). It shows a green or red light and uptime for each server.
+Double-click **`server.cmd`** for the control window (Start, Stop, Restart, Open POS, Back office, Phones on/off, Change password). It shows a green or red light and uptime for each server.
 
 **Start, Stop, Restart, Change password and closing the window need the server control password.** You choose it the first time (12+ characters with upper- and lower-case letters, a number and a symbol). It is stored only as a hash in `.run\control-password`; five wrong tries lock the controls for 15 minutes; every action goes to `.run\control.log`. **Closing the window stops the servers.** Forgot it? An administrator with access to this computer deletes `.run\control-password` and chooses a new one. This password is separate from the till/back-office logins and from the database credentials.
 
@@ -46,6 +46,15 @@ server.cmd stop
 ```
 
 `restart` and `status` work the same way. One command controls both the API/admin (port 8100) and the POS/back office (port 5180). They listen on this computer only. Logs go to `.run\api.log` and `.run\web.log`. If you close the window while the servers are running, it asks whether to stop them.
+
+### Phones and tablets on the shop network
+
+Phone cameras only work on secure (https) pages, so phones need **Phones on**: the *Phones on/off* button, or `server.cmd phones-on` (password needed; `phones-off` turns it back). The web app then answers on the shop network over https with a certificate made on this computer. `status` and the start message show the phone address (e.g. `https://192.168.1.20:5180/#/count`). Each phone accepts the security warning once. Windows may ask to allow Node.js on private networks.
+
+Only the web app is opened to the network. The API stays on `127.0.0.1` and phones reach it through the web app's `/api` proxy. The database admin site (`/admin/`) isn't proxied, so it still works only from the admin networks.
+
+### Ports
+The API and database admin use port **8100** and the POS/back office use **5180**. If another program already uses one of them, **Start** moves to the next free port, remembers it in `.run\ports.json`, and says so. Both servers are told each other's port, and `status` shows the ports in use. `http://localhost:8100/` opens the database admin sign-in.
 
 ## Quick start (local)
 
@@ -114,7 +123,47 @@ Users can never approve their own requests. `Product.min_price` is a floor price
 ### Stock and money
 - Stock changes only through `inventory.services.move_stock`, which locks the stock row (so two tills can't sell the last item) and writes an append-only movement.
 - Every sale, refund, void, goods receipt, stock adjustment, till variance, expense and cash movement posts a balanced journal entry. Each wallet or payment method can have its own ledger account, so each can be reconciled against its statement.
-- **Till sessions:** a cashier opens a till with a float, and closing it requires a cash count. The system calculates the expected cash and posts any over/short to account 5200.
+- **Till sessions:** see *Tills, the vault and cash* below.
+
+### Tills, the vault and cash
+- **Tills:** branch admins create them (*Tills* page) and choose who may open each one.
+  - A till can be assigned to many people, but only one person can have it open at a time.
+  - A person can have only one till open, and a till that's in use shows as *In use by …*.
+- **Opening and closing:** tills always open at **0**.
+  - The float comes from the vault.
+  - At closing, the cashier counts the drawer. Any over/short is posted to account 5200, and all the counted cash is handed to the vault, so the till closes at 0.
+- **Vault:** one per branch.
+  - An admin hands it to a person for the day, or until a chosen time.
+  - While they hold it, that person is the branch's authorizer: they approve price changes, discounts, voids and refunds, and move vault cash. The rights end when the vault is handed on or the time runs out.
+- **What the holder can do:** give floats, pick up cash from tills, pay cash to finance, bank deposits and withdrawals (slip number required), and restocking payments (supplier and invoice required).
+- **Handovers wait for the holder:** cash a cashier hands over (closing a till, or a *Cash drop* from the till) goes to *Cash in transit* (1004).
+  - It **settles in the vault only after the holder counts and confirms it**.
+  - A different count needs a note, and the difference is booked to over/short.
+  - Nobody can confirm cash they handed over themselves; an org admin can.
+- **Ledger:** every movement posts to the ledger (vault 1001, finance 1003, in transit 1004). Balances come from the ledger, and the history has filters by type, status and date.
+
+### Scanning, labels and payment QR
+- **Every common scanner works:**
+  - USB and Bluetooth scanners in keyboard mode (1D and 2D, ending with Enter, Tab or nothing) work anywhere on the till and back office, not only in the search box.
+  - Serial/COM-port scanners connect with the till's *Connect scanner* button (Chrome/Edge).
+  - Phone, tablet and webcam cameras use the *Scan* buttons.
+- **Code formats:** codes are cleaned the same way on the till and the server.
+  - AIM prefixes, GS1 data such as `(01)…(17)…`, and GS1 Digital Link or `?code=` URLs in QR codes are all understood.
+  - UPC-A, EAN-13 and GTIN-14 versions of the same number match each other.
+- **QR shelf labels:** *Products → QR labels* prints the products listed. Each QR holds the barcode (or the SKU), so every scanner reads it.
+- **Pay by QR** on the till shows a QR for a payment method's merchant number or bank account, with the amount and a reference.
+  - Set these in the payment method's settings: `qr_merchant`, `qr_bank` / `qr_account` / `qr_account_name`, or a `qr_template` with `{amount}`, `{ref}` and `{merchant}` for a provider's own QR format.
+  - Online-gateway checkouts also show their link as a QR.
+
+### Stock takes on phones
+- **Counting:** open `#/count` on a phone (the back office shows a QR to it) and sign in.
+  - Counters start or join a stock take and scan items. Each scan adds one, or they can type the shelf total.
+  - Counts are blind by default: counters don't see the system quantity.
+- **Verifying:** a verifier who didn't count the sheet sees the differences, can recount lines, then approves.
+  - Approval posts the differences as adjustments, valued to shrinkage.
+  - Differences are worked out against the quantity when each item was counted, so sales made during the count stay correct.
+- **Look up:** the same screen scans an item to show its stock and price at every branch you work at.
+- **Roles:** new *Stock Taker* and *Stock Verifier* roles. Supervisors and branch admins can count and verify; storekeepers can count.
 
 ### Offline POS
 The till caches the branch catalog, prices, stock and payment methods in IndexedDB. If the server can't be reached, cash and own-terminal card sales are queued locally with a till-generated receipt number and a `client_uuid`. They sync to `/api/sales/sync/` on reconnect and every 30 seconds, and resending is harmless. A sale made offline is always accepted, because it has already happened at the counter. If it broke a rule (an unverifiable PIN, stock going negative, a reused receipt number), it is flagged `needs_review` instead of being rejected.
@@ -129,9 +178,9 @@ The till caches the branch catalog, prices, stock and payment methods in Indexed
 | TNM Mpamba direct | Placeholder: TNM supplies API docs to merchants on application. Use PayChangu for Mpamba until then. |
 
 ## Main API endpoints
-`/api/auth/token/` · `/api/me/` · `/api/pos/catalog/` · `/api/till-sessions/` (+ `close`, `summary`, `current`) · `/api/sales/` (checkout, + `sync`, `void`, `refund`, `cancel`, `add_payment`) · `/api/overrides/` (+ `approve`, `reject`) · `/api/products/` · `/api/stock-levels/` (+ `low`) · `/api/inventory/adjust/` · `/api/purchase-orders/` (+ `receive`) · `/api/transfers/` (+ `send`, `receive`) · `/api/accounting/*` · `/api/reports/trial-balance/` · `/api/reports/sales-summary/` · `/api/hr/*` · `/api/users/` (+ `assign_role`, `revoke_role`) · `/api/audit-logs/`
+`/api/auth/token/` · `/api/me/` (+ `preferences`) · `/api/tills/` · `/api/cash/vaults/` (+ `assign`, `release`, `move`, `confirm`, `candidates`) · `/api/cash/transfers/` · `/api/stock-counts/` (+ `scan`, `submit`, `recount`, `approve`, `reopen`, `cancel`) · `/api/stock/lookup/?code=` · `/api/system/overview/` · `/api/branding/` (+ `settings`) · `/api/proformas/` · `/api/pos/catalog/` · `/api/till-sessions/` (+ `close`, `drop`, `summary`, `current`) · `/api/sales/` (checkout, + `sync`, `void`, `refund`, `cancel`, `add_payment`) · `/api/overrides/` (+ `approve`, `reject`) · `/api/products/` · `/api/stock-levels/` (+ `low`) · `/api/inventory/adjust/` · `/api/purchase-orders/` (+ `receive`) · `/api/transfers/` (+ `send`, `receive`) · `/api/accounting/*` · `/api/reports/trial-balance/` · `/api/reports/sales-summary/` · `/api/hr/*` · `/api/users/` (+ `assign_role`, `revoke_role`) · `/api/audit-logs/`
 
-Send `X-Branch-ID: <id>` to choose the branch you are working in.
+Send `X-Branch-ID: <id>` to choose the branch you are working in. Every list takes `?search=`, `?ordering=<field>` (or `-<field>`), its own filters and `?from=YYYY-MM-DD&to=YYYY-MM-DD`.
 
 ## Back office
 `#/office` in the same web app. Each person sees only the pages their role covers, for the branches they belong to. Org-level roles get an *All branches* picker.
@@ -148,9 +197,47 @@ Send `X-Branch-ID: <id>` to choose the branch you are working in.
 | Transfers | storekeepers, branch admins | Move stock between branches: pick any branch as destination, see what is in stock before sending, send now or save a draft; the receiving branch confirms arrival. Drafts can be cancelled; goods in transit must be received |
 | Expenses, Trial balance | accountants | Record expenses (approved by a second person), check that the books balance |
 | Employees, Leave | HR | Add and edit staff (numbered automatically), departments, linked system login; terminating someone also disables their login at once. Salary, bank and ID details are shown only to HR who manage that person. Approve/reject leave |
+| Vault & cash | branch admins, the vault holder, accountants | Vault balance and holder, handovers waiting for confirmation, open tills with float/pickup, bank/finance/restocking movements, filtered history |
+| Tills | branch admins | Create tills, choose who may open each one, switch tills off |
+| Stock takes | counters, verifiers, branch admins | Start, follow, verify and post stock takes; phone link |
+| System | org admins (everything), branch admins (their branches) | Needs-attention list; today's operations; database, background jobs, disk, server and security health; 14-day activity by type; notable events (failed sign-ins and PINs, server errors, voids, user and vault changes); branch and organization settings. Whole organization or the branch picked at the top. Refreshes every minute |
 | Users & roles, Audit log | branch/org admins | Grant and remove roles per branch, review sensitive actions |
+| Branding | organization admins | Shop name, tagline, logo and brand colours (with light/dark previews and a contrast check); receipt, invoice and proforma layout with live previews |
 
-Organization Admin, Accountant and HR land on the back office after login. Supervisors land on the till, with a *Back office* button to switch.
+Everyone uses the same sign-in screen and goes straight to their place:
+- Organization Admin, Accountant, HR and branch admins go to the back office.
+- Anyone who can sell goes to their branch's till: the branch they last used on that device, else their first selling branch. People who sell at several branches can switch branch on the *Open till* screen.
+- Everyone who can use more than one part of the system gets tabs in every header: **Till · Back office · Stock · Database admin**. Database admin is shown only to organization admins; it opens the admin site on the API port in a new tab, and still works only from the admin networks.
+- Giving someone the Organization Admin role lets them sign in to the database admin site, and removing the role takes that away. Branch admins and other staff are told plainly that it's for organization admins.
+
+Every list has search, filters (status, type, dates and others) and sortable column headers.
+
+## Themes, branding and documents
+
+**Light, dark or system.** Everyone has a three-way switch (sun / monitor / moon) on the sign-in card, the till header and the
+back-office header. *System* follows the device. The choice is saved on the person's account (`/api/me/preferences/`), so it
+follows them to any till or PC; if an account has never chosen, the choice made on that device is kept and saved.
+
+**Branding** (Admin → Branding, organization admins only):
+- Shop name, tagline and logo (PNG/JPEG/WebP up to 3 MB; checked server-side, kept transparent, shrunk to 512 px).
+- Main and accent colour (pickers, hex codes, presets). The app derives readable colours for each theme automatically:
+  *buttons* keep the exact brand colour whenever white or near-black text reads on it (4.5:1 or better), otherwise the shade is
+  nudged; *links, borders and highlights* are darkened (light mode) or lightened (dark mode) until they reach 4.5:1 against the
+  page. The hue never changes. A contrast table shows every pair and its ratio. Chart colours are never re-coloured, so a
+  colour always means the same thing.
+- The login page shows the shop's name, tagline and logo (`GET /api/branding/`, public). Everything is cached so tills keep
+  their look offline.
+
+**Documents** (Branding → Receipts & documents), each with a live preview:
+- *All documents:* business name, address, phone, email, TPIN/VAT number, print the logo or not.
+- *Receipt* (till printer): 80 mm or 58 mm paper, header, footer, show VAT / cashier / product codes.
+- *Invoice* (A4, from any completed sale: back office → Sales → open a sale → Invoice): title, number prefix
+  (invoice number = prefix + receipt number), terms, how to pay (bank / mobile money), footer.
+- *Proforma* (A4 quotation, from the till's **Proforma** button): title, number prefix, validity in days, terms, footer.
+  Proformas are priced by the server at the branch's prices (changing a price needs a supervisor, never below the floor
+  price), numbered (`PF-000001`...), saved for reprinting (`/api/proformas/`), and do not touch stock or the books.
+
+Printed documents always use paper colours (white background, the light-mode brand shade), whatever theme the screen is in.
 
 ## Messages & announcements
 Anyone with **comms.send** (supervisors, branch admins, accountants, HR by default) can send a message or an announcement to any mix of:

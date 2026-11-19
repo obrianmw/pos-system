@@ -2,16 +2,28 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "api",
+      "name": "pos-system-api",
       "runtimeExecutable": "backend/.venv/Scripts/python.exe",
-      "runtimeArgs": ["backend/manage.py", "runserver", "8100"],
+      "runtimeArgs": ["backend/manage.py", "runserver", "8100", "--noreload"],
       "port": 8100
     },
     {
-      "name": "pos",
+      "name": "pos-system-web",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
       "port": 5180
+    },
+    {
+      "name": "pos-system-api-alt",
+      "runtimeExecutable": "backend/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-c", "import os,sys,runpy;os.environ['DJANGO_DEBUG']='1';os.chdir('backend');sys.path.insert(0,'.');sys.argv=['manage.py','runserver','8101','--noreload'];runpy.run_path('manage.py',run_name='__main__')"],
+      "port": 8101
+    },
+    {
+      "name": "pos-system-web-alt",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["frontend/scripts/dev-alt.mjs"],
+      "port": 5181
     }
   ]
 }

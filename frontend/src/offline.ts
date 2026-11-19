@@ -15,6 +15,8 @@ export type CatalogCategory = {
 };
 export type PaymentMethod = {
   id: number; name: string; kind: string; provider: string; requires_reference: boolean; allowed_offline: boolean;
+  /** Payment-QR settings from the method's config (qr_merchant, qr_account, qr_bank, qr_account_name, qr_template). */
+  qr?: Record<string, string>;
 };
 export type Catalog = {
   branch: { id: number; name: string; code: string; currency: string; max_cashier_discount_pct: string;

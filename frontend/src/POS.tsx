@@ -1,6 +1,13 @@
 import { toast } from "./backoffice/ui";
+import { formDialog } from "./Dialog";
 import { InboxView, PinnedBanner, useInboxSummary } from "./backoffice/messages";
-import { Mail, ShoppingCart, Wifi, WifiOff } from "lucide-react";
+import { FileText, Mail, Printer, QrCode, Wifi, WifiOff } from "lucide-react";
+import { QrImage, ScanButton, ScannerModal } from "./Scanner";
+import { SystemTabs } from "./SystemTabs";
+import { connectSerialScanner, matchesCode, serialSupported, useScannerInput } from "./scanning";
+import { BrandMark, useBrandingState } from "./BrandMark";
+import { printDoc, Proforma, Receipt } from "./docs";
+import { ThemeSwitch } from "./theme";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, money, OfflineError } from "./api";
 import type { Me, Session } from "./App";
@@ -26,8 +33,9 @@ export default function POS({ me, branch, session, onLogout, onClosed, onOffice 
   const [syncErrors, setSyncErrors] = useState<string[]>([]);
   const [paying, setPaying] = useState(false);
   const [receipt, setReceipt] = useState<any | null>(null);
+  const [proformaOpen, setProformaOpen] = useState(false);
   const [askOverride, setAskOverride] = useState<{ idx: number; why: string } | null>(null);
-  const [panel, setPanel] = useState<"" | "approvals" | "close">("");
+  const [panel, setPanel] = useState<"" | "approvals" | "close" | "scan" | "payqr">("");
   const searchRef = useRef<HTMLInputElement>(null);
   const inbox = useInboxSummary();
   const [inboxOpen, setInboxOpen] = useState(false);
@@ -63,9 +71,46 @@ export default function POS({ me, branch, session, onLogout, onClosed, onOffice 
     searchRef.current?.focus();
   }
 
-  // Enter in the search box: exact barcode/SKU match goes straight in (barcode scanners send Enter).
+  // Camera scan: exact barcode/SKU only (never a fuzzy name match).
+  function scanned(code: string) {
+    const raw = code.trim();
+    const p = catalog?.products.find((x) => matchesCode(x, raw));
+    if (p) { add(p); toast(`Added ${p.name}`, "success"); }
+    else toast(`No product with code ${raw}.`, "error");
+  }
+
+  // Keyboard-mode USB/Bluetooth scanners work even when the search box doesn't have focus.
+  useScannerInput(scanned, !panel && !paying && !receipt && !askOverride && !proformaOpen && !inboxOpen);
+  // Serial (COM-port) scanner: reconnect to one allowed before; the header button picks a new one.
+  const [serialOn, setSerialOn] = useState(false);
+  const serialStop = useRef<null | (() => Promise<void>)>(null);
+  const scannedRef = useRef(scanned); scannedRef.current = scanned;
+  async function serial(pick: boolean) {
+    try {
+      const stop = await connectSerialScanner((c) => scannedRef.current(c), pick);
+      if (stop) { serialStop.current = stop; setSerialOn(true); if (pick) toast("Serial scanner connected.", "success"); }
+    } catch (e: any) { if (pick) toast(`Couldn't connect the scanner: ${e?.message || e}`, "error"); }
+  }
+  useEffect(() => { if (serialSupported()) serial(false); return () => { serialStop.current?.(); }; }, []);
+
+  // Cash drop: spare cash goes to the vault holder, who counts and confirms it in the back office.
+  async function cashDrop() {
+    const v = await formDialog({ title: "Cash drop to the vault", confirmLabel: "Hand over",
+      message: "Count the cash you're handing to the vault holder. It's recorded as waiting until they confirm it.",
+      fields: [{ name: "amount", label: "Amount handed over", type: "number", required: true,
+                 validate: (x) => (Number(x) > 0 ? null : "Enter an amount above zero.") },
+               { name: "note", label: "Note (optional)" }] });
+    if (!v) return;
+    try {
+      const r = await api<{ till_balance: string }>(`/till-sessions/${session.id}/drop/`, { body: v });
+      toast(`Handed over ${money(v.amount)}. The vault holder must confirm it. Left in drawer: ${money(r.till_balance)}.`, "success");
+    } catch (e: any) { toast(e.message, "error"); }
+  }
+
+  // Enter (or Tab) in the search box: an exact barcode/SKU match goes straight in (scanners send Enter or Tab).
   function onSearchKey(e: React.KeyboardEvent) {
     if (e.key === "Enter" && matches.length) add(matches[0]);
+    else if (e.key === "Tab" && matches.length && matchesCode(matches[0], query)) { e.preventDefault(); add(matches[0]); }
   }
 
   function update(idx: number, patch: Partial<Line>) {
@@ -156,17 +201,21 @@ export default function POS({ me, branch, session, onLogout, onClosed, onOffice 
     <div className="pos">
       <PinnedBanner summary={inbox} onOpen={() => setInboxOpen(true)} />
       <header>
-        <span className="logo-mark" style={{ width: 30, height: 30 }}><ShoppingCart size={16} /></span>
+        <BrandMark size={30} />
         <strong>{catalog?.branch.organization} · {branch.name} · {session.till_name}</strong>
         <span className={`pill ${online ? "online" : "offline"}`}>{online ? <Wifi size={13} /> : <WifiOff size={13} />}{online ? "Online" : "Offline"}</span>
         {pending > 0 && <span className="warn">{pending} sale(s) waiting to sync</span>}
         {syncErrors.length > 0 && <span className="error" title={syncErrors.join("\n")}>Sync errors: {syncErrors.length}</span>}
         <span className="spacer" />
         {can("pos.price_override") && <button onClick={() => setPanel("approvals")}>Approvals</button>}
-        {onOffice && <button onClick={onOffice}>Back office</button>}
+        <SystemTabs me={me} current="pos" />
+        <ThemeSwitch compact />
         <button className="ghost icon bell" aria-label={`Messages, ${inbox.unread} unread`} onClick={() => setInboxOpen(true)}>
           <Mail size={19} />{inbox.unread > 0 && <span className="count">{inbox.unread}</span>}
         </button>
+        {serialSupported() && <button onClick={() => (serialOn ? undefined : serial(true))} title="Connect a serial / COM-port barcode scanner">
+          {serialOn ? "Serial scanner ✓" : "Connect scanner"}</button>}
+        <button onClick={cashDrop} title="Hand spare cash to the vault holder">Cash drop</button>
         <button onClick={() => setPanel("close")}>Close till</button>
         <span>{me.name}</span>
         <button className="link" onClick={onLogout}>Log out</button>
@@ -176,6 +225,7 @@ export default function POS({ me, branch, session, onLogout, onClosed, onOffice 
         <section className="search">
           <input ref={searchRef} autoFocus type="search" placeholder="Scan barcode or search all products…" value={query}
                  aria-label="Scan barcode or search products" onChange={(e) => setQuery(e.target.value)} onKeyDown={onSearchKey} />
+          <ScanButton onClick={() => setPanel("scan")} />
           {catalog ? <CategoryBrowser catalog={catalog} query={query} onAdd={add} /> : <p>Loading catalog…</p>}
           {catalog?.fetched_at && <small>Catalog as of {new Date(catalog.fetched_at).toLocaleTimeString()}</small>}
         </section>
@@ -197,7 +247,12 @@ export default function POS({ me, branch, session, onLogout, onClosed, onOffice 
             </tbody>
           </table>
           <div className="total">Total <b>{catalog?.branch.currency} {money(total)}</b></div>
-          <button className="primary" disabled={!lines.length} onClick={startPay}>Pay (F2)</button>
+          <div className="actions" style={{ marginTop: 0 }}>
+            <button className="primary" style={{ flex: 1 }} disabled={!lines.length} onClick={startPay}>Pay (F2)</button>
+            <button disabled={!lines.length} onClick={() => setProformaOpen(true)} title="Print a priced quotation for this basket">
+              <FileText size={16} />Proforma</button>
+            <button onClick={() => setPanel("payqr")} title="Show a QR code the customer scans to pay"><QrCode size={16} />Pay by QR</button>
+          </div>
         </section>
       </main>
 
@@ -207,7 +262,8 @@ export default function POS({ me, branch, session, onLogout, onClosed, onOffice 
       )}
       {paying && catalog && <PayDialog total={total} methods={catalog.payment_methods} online={online}
                                        onCheckout={checkout} onDone={finishSale} onCancel={() => setPaying(false)} />}
-      {receipt && <Receipt sale={receipt} catalog={catalog} cashier={me.name} onClose={() => setReceipt(null)} />}
+      {receipt && <ReceiptDialog sale={receipt} catalog={catalog} cashier={me.name} onClose={() => setReceipt(null)} />}
+      {proformaOpen && <ProformaDialog lines={lines} branchName={branch.name} onClose={() => setProformaOpen(false)} />}
       {panel === "approvals" && <Approvals onClose={() => setPanel("")} />}
       {inboxOpen && (
         <div className="modal" onClick={(e) => e.target === e.currentTarget && setInboxOpen(false)}>
@@ -216,6 +272,8 @@ export default function POS({ me, branch, session, onLogout, onClosed, onOffice 
             <InboxView compact /></div>
         </div>
       )}
+      {panel === "scan" && <ScannerModal title="Scan to add to the sale" keepOpen onCode={scanned} onClose={() => setPanel("")} />}
+      {panel === "payqr" && catalog && <PayQrDialog total={total} catalog={catalog} till={session.till_name} onClose={() => setPanel("")} />}
       {panel === "close" && <CloseTill session={session} onClose={() => setPanel("")} onClosed={onClosed} pending={pending} />}
     </div>
   );
@@ -284,7 +342,8 @@ function PayDialog({ total, methods, online, onCheckout, onDone, onCancel }: {
       <div className="modal"><div className="card">
         <h3>Waiting for payment…</h3>
         {p && <p>{p.method_name}: {money(p.amount)} — {p.status}. {p.message}</p>}
-        {p?.checkout_url && <p>Customer pays at: <a href={p.checkout_url} target="_blank">{p.checkout_url}</a></p>}
+        {p?.checkout_url && <div className="payqr-one"><QrImage text={p.checkout_url} size={200} label="Scan to pay" />
+          <p>Customer scans to pay, or opens: <a href={p.checkout_url} target="_blank" rel="noreferrer">{p.checkout_url}</a></p></div>}
         {p?.status === "failed" && <p className="error">Payment failed. Cancel and take another method.</p>}
         <button className="link" onClick={cancelPending}>Cancel sale</button>
       </div></div>
@@ -316,20 +375,110 @@ function PayDialog({ total, methods, online, onCheckout, onDone, onCancel }: {
   );
 }
 
-function Receipt({ sale, catalog, cashier, onClose }: { sale: any; catalog: Catalog | null; cashier: string; onClose: () => void }) {
+/** Quick payment QR: one code per QR-ready method (mobile money merchant / bank account), with the
+ *  amount and a short reference the cashier then types as the payment's reference. */
+function PayQrDialog({ total, catalog, till, onClose }: { total: number; catalog: Catalog; till: string; onClose: () => void }) {
+  const [amount, setAmount] = useState(total ? total.toFixed(2) : "");
+  const [ref] = useState(() => `${catalog.branch.code}-${till.replace(/\s+/g, "")}-${new Date().toTimeString().slice(0, 8).replace(/:/g, "")}`.toUpperCase());
+  const ready = catalog.payment_methods.filter((m) => m.qr && (m.qr.merchant || m.qr.account || m.qr.template));
+  const [pick, setPick] = useState(ready[0]?.id ?? 0);
+  const m = ready.find((x) => x.id === pick);
+  const amt = Number(amount || 0).toFixed(2);
+  const qr = m?.qr || {};
+  const text = !m ? "" : qr.template
+    ? qr.template.replace(/\{amount\}/g, amt).replace(/\{ref\}/g, ref).replace(/\{merchant\}/g, qr.merchant || "")
+    : [`Pay ${catalog.branch.organization} - ${catalog.branch.name}`,
+       qr.merchant ? `${m.name} merchant/till no: ${qr.merchant}` : m.name,
+       qr.account ? `Account: ${qr.account}${qr.bank ? ` (${qr.bank})` : ""}${qr.account_name ? `, ${qr.account_name}` : ""}` : "",
+       `Amount: ${catalog.branch.currency} ${amt}`, `Reference: ${ref}`].filter(Boolean).join("\n");
   return (
-    <div className="modal"><div className="card receipt">
-      <h3>{catalog?.branch.organization}</h3>
-      <p>{catalog?.branch.name}<br />Receipt {sale.number} · {new Date().toLocaleString()}<br />Cashier: {cashier}</p>
-      <table><tbody>
-        {sale.lines.map((l: any, i: number) => <tr key={i}><td>{Number(l.quantity)} × {l.description}</td><td>{money(l.line_total)}</td></tr>)}
-      </tbody></table>
-      <p><b>Total {money(sale.total)}</b>{sale.tax_total && <><br />incl. VAT {money(sale.tax_total)}</>}</p>
-      {sale.payments.map((p: any, i: number) => <p key={i}>{p.method_name} {money(p.amount)}{p.change && Number(p.change) > 0 && <> · change {money(p.change)}</>}</p>)}
-      {sale.offline && <p className="warn">Recorded offline — will sync automatically.</p>}
-      <p><small>{catalog?.branch.receipt_footer}</small></p>
-      <button onClick={() => window.print()}>Print</button>
-      <button className="primary" onClick={onClose} autoFocus>New sale</button>
+    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="card payqr" role="dialog" aria-label="Pay by QR">
+        <div className="card-head"><h3><QrCode size={18} style={{ verticalAlign: -3 }} /> Pay by QR</h3>
+          <button className="link" onClick={onClose}>Close</button></div>
+        {!ready.length ? <p className="muted">No payment method has QR details yet. An admin adds them to a payment method's settings
+          (<code>qr_merchant</code>, or <code>qr_bank</code> + <code>qr_account</code>).</p> : <>
+          <div className="inline" style={{ flexWrap: "wrap" }}>
+            {ready.map((x) => <button key={x.id} className={x.id === pick ? "primary" : ""} onClick={() => setPick(x.id)}>{x.name}</button>)}
+          </div>
+          <label>Amount ({catalog.branch.currency}) <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+          {m && Number(amount) > 0 ? <div className="payqr-one">
+            <QrImage text={text} size={240} label={`Scan to pay ${money(amt)} with ${m.name}`} />
+            <div><p style={{ margin: 0 }}><b>{money(amt)}</b> via {m.name}</p>
+              {qr.merchant && <p style={{ margin: 0 }}>Merchant / till no: <b>{qr.merchant}</b></p>}
+              {qr.account && <p style={{ margin: 0 }}>{qr.bank} {qr.account}</p>}
+              <p style={{ margin: 0 }}>Reference: <b>{ref}</b></p>
+              <p className="muted" style={{ fontSize: ".85rem" }}>When the customer's payment comes through, take payment with {m.name} and enter the transaction ID as the reference.</p></div>
+          </div> : <p className="muted">Enter an amount to show the code.</p>}
+        </>}
+      </div>
+    </div>
+  );
+}
+
+function ReceiptDialog({ sale, catalog, cashier, onClose }: { sale: any; catalog: Catalog | null; cashier: string; onClose: () => void }) {
+  const brand = useBrandingState();
+  const box = useRef<HTMLDivElement>(null);
+  const settings = { name: catalog?.branch.organization || "", receipt_footer: catalog?.branch.receipt_footer, ...(brand || {}) } as any;
+  return (
+    <div className="modal"><div className="card">
+      <div ref={box} className="doc-preview" style={{ maxHeight: "60vh" }}>
+        <Receipt s={settings} branch={catalog?.branch.name || ""} number={sale.number} date={sale.completed_at || sale.created_at}
+          cashier={cashier} total={sale.total} tax={sale.tax_total} offline={sale.offline}
+          items={sale.lines.map((l: any) => ({ name: l.description, qty: l.quantity, unit_price: l.unit_price ?? 0, line_total: l.line_total,
+            sku: catalog?.products.find((p) => p.name === l.description)?.sku }))}
+          payments={sale.payments.map((p: any) => ({ name: p.method_name, amount: p.amount, change: p.change }))} />
+      </div>
+      <div className="actions">
+        <button onClick={() => printDoc(box.current)}><Printer size={16} />Print</button>
+        <button className="primary" onClick={onClose} autoFocus>New sale</button>
+      </div>
+    </div></div>
+  );
+}
+
+function ProformaDialog({ lines, branchName, onClose }: { lines: Line[]; branchName: string; onClose: () => void }) {
+  const brand = useBrandingState();
+  const box = useRef<HTMLDivElement>(null);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [pf, setPf] = useState<any>(null);
+  const discounted = lines.some((l) => l.discount > 0);
+
+  async function create() {
+    setBusy(true);
+    try {
+      setPf(await api("/proformas/", { body: {
+        customer_name: name, customer_phone: phone, note,
+        lines: lines.map((l) => ({ product_id: l.product.id, quantity: String(l.qty),
+          ...(l.price !== Number(l.product.price) ? { unit_price: l.price.toFixed(2) } : {}) })) } }));
+    } catch (e) { toast((e as Error).message, "error"); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}><div className="card wide">
+      {!pf ? <>
+        <h3>Proforma for this basket</h3>
+        <p className="muted" style={{ margin: 0 }}>A priced quotation for the customer. Nothing is sold and stock is not reserved.</p>
+        {discounted && <p className="warn-box">Line discounts are not carried onto proformas; change the price instead (needs a supervisor).</p>}
+        <div className="form-grid">
+          <label>Customer name<input value={name} onChange={(e) => setName(e.target.value)} autoFocus /></label>
+          <label>Phone<input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" /></label>
+          <label style={{ gridColumn: "1 / -1" }}>Note<input value={note} onChange={(e) => setNote(e.target.value)} placeholder="optional, e.g. for school order" /></label>
+        </div>
+        <div className="actions">
+          <button className="primary" disabled={busy} onClick={create}><FileText size={16} />Create proforma</button>
+          <button className="link" onClick={onClose}>Cancel</button>
+        </div>
+      </> : <>
+        <div ref={box} className="doc-preview"><Proforma s={(brand || {}) as any} pf={pf} branch={branchName} /></div>
+        <div className="actions">
+          <button className="primary" onClick={() => printDoc(box.current)}><Printer size={16} />Print {pf.number}</button>
+          <button onClick={onClose}>Done</button>
+        </div>
+      </>}
     </div></div>
   );
 }
@@ -375,12 +524,14 @@ function CloseTill({ session, onClose, onClosed, pending }: { session: Session; 
         {summary.by_method.map((r: any, i: number) => <p key={i}>{r.sale__kind} · {r.method__name}: {money(r.total)} ({r.count})</p>)}
       </>}
       {!result ? <>
+        <p className="muted" style={{ margin: 0 }}>Count all the cash in the drawer. It's handed to the vault holder, who counts and confirms it; the till closes at zero.</p>
         <label>Cash counted in drawer <input inputMode="decimal" value={counted} onChange={(e) => setCounted(e.target.value)} autoFocus /></label>
         <button className="primary" disabled={!counted || pending > 0} onClick={close}>Close till</button>
         <button className="link" onClick={onClose}>Back</button>
       </> : <>
         <p>Expected {money(result.expected_cash)} · Counted {money(result.counted_cash)} ·{" "}
           <b className={Number(result.variance) === 0 ? "ok" : "error"}>Variance {money(result.variance)}</b></p>
+        <p className="ok">{money(result.counted_cash)} handed over. It settles in the vault once the vault holder confirms it. Till balance: {money(0)}.</p>
         <button className="primary" onClick={onClosed}>Done</button>
       </>}
     </div></div>

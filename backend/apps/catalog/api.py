@@ -318,6 +318,7 @@ def pos_catalog(request):
             "track_stock": p.track_stock, "stock": str(stock.get(p.pk, 0)), "reorder_level": str(p.reorder_level),
         } for p in products],
         "payment_methods": [{"id": m.pk, "name": m.name, "kind": m.kind, "provider": m.provider,
-                             "requires_reference": m.requires_reference, "allowed_offline": m.allowed_offline}
+                             "requires_reference": m.requires_reference, "allowed_offline": m.allowed_offline,
+                             "qr": {k[3:]: v for k, v in (m.config or {}).items() if k.startswith("qr_")}}
                             for m in methods],
     })
