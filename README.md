@@ -307,3 +307,10 @@ properly configured production server.
 - Payroll calculation (PAYE, pension), loyalty points, promotions and price lists, a customer credit ledger, receipt printers and cash drawers, and TRA/MRA fiscal device integration.
 - Sandbox testing of each wallet provider, and refunds back to wallets through provider APIs.
 - Load testing at 100+ concurrent users per branch on Postgres.
+
+## Licence
+
+Free to use under the [MIT Licence](LICENSE). You may use, change and share it, including in your own shop or
+products, as long as you keep the copyright notice, crediting the original creator, **Oblation Brian Simbeye**.
+Contributions are welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)). For help setting it up, get in touch: set-up
+support is available at an agreed fee.
