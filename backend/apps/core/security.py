@@ -81,7 +81,9 @@ def validate_production(s):
     if s["SECRET_KEY"].startswith("dev-") or len(s["SECRET_KEY"]) < 40:
         problems.append("DJANGO_SECRET_KEY must be set to a random value of 40+ characters.")
     db = s["DATABASES"]["default"]
-    if db["ENGINE"].endswith("sqlite3"):
+    if s.get("DEMO_MODE"):
+        pass  # public demo: a throwaway SQLite database on the host's temporary disk, reset on restart
+    elif db["ENGINE"].endswith("sqlite3"):
         problems.append("DATABASE_URL must point at PostgreSQL in production (SQLite has no credentials).")
     else:
         pw, user = db.get("PASSWORD") or "", db.get("USER") or ""

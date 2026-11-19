@@ -36,7 +36,7 @@ def test_public_branding_needs_no_login(demo):
     r = Client().get("/api/branding/")
     assert r.status_code == 200
     body = r.json()
-    assert body["name"] == "Aden Shop" and body["primary_color"].startswith("#")
+    assert body["name"] == "Aden Trifo Shop" and body["primary_color"].startswith("#")
     assert "doc_tax_number" not in body and "invoice_terms" not in body  # document settings stay private
 
 

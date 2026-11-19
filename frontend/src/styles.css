@@ -638,3 +638,11 @@ nav.system-tabs a, .office nav.system-tabs a { display: inline-flex; font-weight
 .upload-table thead th { position: sticky; top: 0; z-index: 1; }
 .row-bad td { background: color-mix(in srgb, var(--error) 7%, transparent); }
 .upload-done { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 18px; }
+
+/* Public demo: the shared accounts on the sign-in card */
+.demo-accounts { margin-top: 8px; border-top: 1px solid var(--line, rgba(127,127,127,.25)); padding-top: 8px; text-align: left; font-size: 13px; }
+.demo-accounts summary { cursor: pointer; font-weight: 600; }
+.demo-accounts p { margin: 8px 0; }
+.demo-accounts table { width: 100%; border-collapse: collapse; }
+.demo-accounts td { padding: 3px 4px; vertical-align: top; }
+.demo-accounts .demo-fill { background: none; border: 0; padding: 0; color: var(--accent, inherit); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; }

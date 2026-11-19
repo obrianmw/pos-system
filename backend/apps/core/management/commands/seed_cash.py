@@ -44,7 +44,7 @@ class Command(BaseCommand):
         # Demo payment-QR details (an admin replaces these with the shop's real merchant/bank numbers).
         from apps.payments.models import PaymentMethod
         demo_qr = {"Airtel Money": {"qr_merchant": "DEMO-0880000"}, "MTN MoMo": {"qr_merchant": "DEMO-0990000"},
-                   "Bank transfer": {"qr_bank": "Demo Bank", "qr_account": "000000000000", "qr_account_name": "Aden Shop"}}
+                   "Bank transfer": {"qr_bank": "Aden Trifo Bank", "qr_account": "000000000000", "qr_account_name": "Aden Shop"}}
         for m in PaymentMethod.objects.filter(organization__code=org, name__in=demo_qr):
             if not any(k.startswith("qr_") for k in m.config or {}):
                 m.config = {**(m.config or {}), **demo_qr[m.name]}

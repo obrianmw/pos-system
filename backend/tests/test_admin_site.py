@@ -48,7 +48,7 @@ def test_admin_pages_wear_the_shop_brand(demo, client_for):
     b.save()
     r = Client().get("/admin/login/")
     html = r.content.decode()
-    assert r.status_code == 200 and "Aden Shop" in html and "Sign in to the database admin" in html
+    assert r.status_code == 200 and "Aden Trifo Shop" in html and "Sign in to the database admin" in html
     c, _ = login("owner")
     page = c.get("/admin/").content.decode()
     assert "Database admin" in page and "Back office" in page and "#ffd400" in page  # button fill keeps the brand

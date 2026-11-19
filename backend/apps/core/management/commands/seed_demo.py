@@ -52,12 +52,12 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **opts):
-        org, _ = Organization.objects.get_or_create(code="demo", defaults={"name": "Aden Shop", "currency": "MWK"})
+        org, _ = Organization.objects.get_or_create(code="demo", defaults={"name": "Aden Trifo Shop", "currency": "MWK"})
         setup_organization(org)
         from apps.core.models import Branding
         Branding.objects.get_or_create(organization=org, defaults={
-            "display_name": "Aden Shop", "tagline": "Groceries, fresh food and more",
-            "doc_business_name": "Aden Shop", "doc_phone": "+265 1 000 000", "doc_email": "hello@adenshop.example",
+            "display_name": "Aden Trifo Shop", "tagline": "Groceries, fresh food and more",
+            "doc_business_name": "Aden Trifo Shop", "doc_phone": "+265 1 000 000", "doc_email": "hello@adentrifoshop.example",
             "doc_address": "City Centre, Lilongwe, Malawi"})
         branches = {}
         for code, name in [("ll", "Lilongwe City Centre"), ("bt", "Blantyre Limbe")]:

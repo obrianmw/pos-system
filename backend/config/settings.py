@@ -16,6 +16,9 @@ def env(name, default=None):
 SECRET_KEY = env("DJANGO_SECRET_KEY", "dev-insecure-key-change-me")
 DEBUG = env("DJANGO_DEBUG", "1") == "1"
 ALLOWED_HOSTS = [h for h in env("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h]
+# Public demo (apps/core/demo_guard.py, demo_start.py): SQLite that resets on restart, the built till served
+# from this address, and the changes that would break a shared demo switched off.
+DEMO_MODE = env("DEMO_MODE", "0") == "1"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -44,10 +47,12 @@ MIDDLEWARE = [
     "apps.core.views.FriendlyErrorMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.core.demo_guard.DemoGuardMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -145,6 +150,10 @@ FRONTEND_URL = env("FRONTEND_URL", env("POS_WEB_URL", "http://localhost:5180/"))
 # "127.0.0.1/32,::1/128,10.20.0.0/24". Everyone else gets 403 before any login page.
 # Where the POS / back office runs (the admin site's "View site" link). The server controller sets it.
 WEB_APP_URL = FRONTEND_URL
+if DEMO_MODE:
+    # The built till and back office (npm run build) at the site root, next to /api.
+    WHITENOISE_ROOT = BASE_DIR.parent / "frontend" / "dist"
+    WHITENOISE_INDEX_FILE = True
 API_PORT = int(env("POS_API_PORT", "8100"))  # where the database admin site (/admin/) answers
 ADMIN_ALLOWED_NETWORKS = env("ADMIN_ALLOWED_NETWORKS", "127.0.0.1/32,::1/128")
 # Set to 1 when Django runs behind exactly one reverse proxy (nginx) that sets X-Forwarded-For.

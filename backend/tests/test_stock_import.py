@@ -16,7 +16,7 @@ def xlsx(rows, header=("SKU", "Barcode", "Name", "Category", "Cost", "Price", "Q
     wb = Workbook()
     ws = wb.active
     ws.title = "Stock"
-    ws.append(["Aden Shop stock list"])  # a title row above the header is fine
+    ws.append(["Aden Trifo Shop stock list"])  # a title row above the header is fine
     ws.append(list(header))
     for r in rows:
         ws.append(list(r))

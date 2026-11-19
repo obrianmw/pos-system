@@ -136,6 +136,26 @@ function Login({ onDone, error, setError }: { onDone: (m: Me) => void; error: st
       {error && <p className="error">{error}</p>}
       <button className="primary" disabled={busy || !u || !p}>{busy ? "Signing in…" : "Sign in"}</button>
       <div style={{ display: "flex", justifyContent: "center", marginTop: 4 }}><ThemeSwitch compact /></div>
+      {brand?.demo && (
+        <details className="demo-accounts">
+          <summary>Demo accounts</summary>
+          <p className="muted">
+            Password for all: <b>{brand.demo.password}</b> · Supervisor PIN: <b>{brand.demo.pin}</b>.
+            Click an account to fill it in. Names of people in the demo shop are made up.
+          </p>
+          <table>
+            <tbody>
+              {brand.demo.accounts.map((a) => (
+                <tr key={a.username}>
+                  <td><button type="button" className="demo-fill" onClick={() => { setU(a.username); setP(brand.demo!.password); setError(""); }}>{a.username}</button></td>
+                  <td>{a.role}{a.has_pin ? " · PIN" : ""}</td>
+                  <td className="muted">{a.branch}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
     </form>
   );
 }

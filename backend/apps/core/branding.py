@@ -91,9 +91,14 @@ def _org_for_public(request):
 def public_branding(request):
     """What the login page needs - nothing private (logos and colours are on every receipt anyway)."""
     b = Branding.for_org(_org_for_public(request))
-    return Response({"name": b.display_name or b.organization.name, "tagline": b.tagline,
-                     "logo_url": b.logo.url if b.logo else None,
-                     "primary_color": b.primary_color, "accent_color": b.accent_color})
+    data = {"name": b.display_name or b.organization.name, "tagline": b.tagline,
+            "logo_url": b.logo.url if b.logo else None,
+            "primary_color": b.primary_color, "accent_color": b.accent_color}
+    from django.conf import settings
+    if getattr(settings, "DEMO_MODE", False):
+        from .demo_guard import demo_accounts
+        data["demo"] = demo_accounts()  # the sign-in page lists the shared demo accounts
+    return Response(data)
 
 
 @api_view(["GET", "PATCH"])

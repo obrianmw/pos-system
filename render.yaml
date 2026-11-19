@@ -1,0 +1,21 @@
+# Render Blueprint for the public demo (branch: demo). One web service serves the API and the built till and
+# back office (frontend/dist, committed on this branch). Free plan: the service sleeps when idle and its disk is
+# temporary, so each restart reloads the demo shop. No root directory, so a change to the till alone redeploys too.
+services:
+  - type: web
+    name: pos-system-demo
+    runtime: python
+    plan: free
+    branch: demo
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && python demo_start.py
+    healthCheckPath: /api/branding/
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DEMO_MODE
+        value: "1"
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true

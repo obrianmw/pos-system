@@ -127,7 +127,14 @@ export function applyBrand(primary: string, accent: string) {
 }
 
 // ---- branding store (public bits for the login page, full settings after sign-in) ------------
-export type PublicBranding = { name: string; tagline: string; logo_url: string | null; primary_color: string; accent_color: string };
+export type DemoAccounts = {
+  password: string; pin: string;
+  accounts: { username: string; role: string; branch: string; has_pin: boolean }[];
+};
+export type PublicBranding = {
+  name: string; tagline: string; logo_url: string | null; primary_color: string; accent_color: string;
+  demo?: DemoAccounts | null; // only on the public demo: the sign-in page lists the shared accounts
+};
 export type BrandingSettings = PublicBranding & Record<string, any>;
 
 let current: BrandingSettings | null = null;

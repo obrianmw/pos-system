@@ -53,7 +53,7 @@ def test_only_org_admins_can_use_admin_site(demo):
 
 
 def _prod(**over):
-    base = {"SECRET_KEY": "k" * 50, "ALLOWED_HOSTS": ["pos.adenshop.example"], "DATABASE_OWNER_USER": "pos_owner",
+    base = {"SECRET_KEY": "k" * 50, "ALLOWED_HOSTS": ["pos.adentrifoshop.example"], "DATABASE_OWNER_USER": "pos_owner",
             "DATABASES": {"default": {"ENGINE": "django.db.backends.postgresql", "USER": "pos_app",
                                       "PASSWORD": "Zx9-long-random-db-pass"}}}
     base.update(over)
