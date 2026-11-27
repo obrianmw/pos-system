@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import type { Ctx } from "./BackOffice";
+import { SortHeader, useListState } from "./listing";
 import { errorText, initials, toast } from "./ui";
 import { confirmDialog } from "../Dialog";
 
@@ -88,6 +89,11 @@ export function InboxView({ archived = false, compact = false }: { archived?: bo
   const [filter, setFilter] = useState<"all" | "unread" | "announcement">("all");
   const [open, setOpen] = useState<any>(null);
   const [tick, setTick] = useState(0);
+  const sorter = useListState({ sort: "-when" });
+  const PR: Record<string, number> = { urgent: 0, important: 1, normal: 2 };
+  const shown = rows && sorter.apply(rows, {
+    text: (r: any) => `${r.subject} ${r.sender_name} ${r.body}`,
+    sorts: { when: (r: any) => r.sent_at, priority: (r: any) => PR[r.priority] ?? 3, sender: (r: any) => r.sender_name, subject: (r: any) => r.subject } });
 
   useEffect(() => {
     const q = new URLSearchParams({ folder: archived ? "archived" : "inbox", page_size: "100" });
@@ -125,10 +131,19 @@ export function InboxView({ archived = false, compact = false }: { archived?: bo
             </div>
             {!archived && <button className="link" onClick={readAll}><CheckCheck size={15} />Mark all read</button>}
           </div>
+          <div className="toolbar" style={{ marginBottom: 8 }}>
+            <input type="search" placeholder="Search messages" aria-label="Search messages" value={sorter.typed}
+                   onChange={(e) => sorter.setTyped(e.target.value)} style={{ flex: 1, minWidth: 140 }} />
+            <select aria-label="Sort messages" value={sorter.state.sort} onChange={(e) => sorter.setSort(e.target.value)}>
+              <option value="-when">Newest first</option><option value="when">Oldest first</option>
+              <option value="priority">Urgent first</option><option value="sender">By sender</option><option value="subject">By subject</option>
+            </select>
+          </div>
           <div className="mail-list">
             {rows === null && <div className="skeleton" style={{ height: 180, margin: 12 }} />}
             {rows?.length === 0 && <p className="muted" style={{ padding: 16 }}>{archived ? "Nothing archived." : "No messages. You’re all caught up."}</p>}
-            {rows?.map((r) => (
+            {rows && rows.length > 0 && shown?.length === 0 && <p className="muted" style={{ padding: 16 }}>No messages match.</p>}
+            {shown?.map((r) => (
               <button key={r.id} className={`mail-item ${r.read_at ? "" : "unread"} ${open?.id === r.id ? "active" : ""}`} onClick={() => select(r)}>
                 <span className={`m-dot ${r.read_at ? "read" : ""}`} aria-label={r.read_at ? "" : "Unread"} />
                 <span className="m-subject">{r.kind === "announcement" && <Megaphone size={13} style={{ marginRight: 5, verticalAlign: -2 }} />}{r.subject}</span>
@@ -206,14 +221,33 @@ function SentView() {
   const [open, setOpen] = useState<any>(null);
   const [who, setWho] = useState<any[] | null>(null);
   useEffect(() => { api("/comms/sent/?page_size=100", { branch: null }).then((d) => setRows(d.results)).catch(() => setRows([])); }, []);
+  const sorter = useListState({ sort: "-when" });
+  const done = (m: any) => (m.recipient_count ? (m.requires_ack ? m.ack_count : m.read_count) / m.recipient_count : 1);
+  const shown = rows && sorter.apply(rows, {
+    text: (m: any) => `${m.subject} ${m.audience_label} ${m.body}`,
+    filters: { kind: (m: any, v) => m.kind === v, state: (m: any, v) => (v === "open" ? done(m) < 1 : done(m) >= 1) },
+    sorts: { when: (m: any) => m.created_at, read: (m: any) => done(m), subject: (m: any) => m.subject } });
   useEffect(() => { setWho(null); if (open) api(`/comms/sent/${open.id}/recipients/`, { branch: null }).then(setWho).catch(() => setWho([])); }, [open?.id]);
 
   return (
     <div className="mail">
+      <div>
+      <div className="toolbar" style={{ marginBottom: 8 }}>
+        <input type="search" placeholder="Search sent" aria-label="Search sent messages" value={sorter.typed}
+               onChange={(e) => sorter.setTyped(e.target.value)} style={{ flex: 1, minWidth: 140 }} />
+        <select aria-label="Type" value={sorter.state.filters.kind || ""} onChange={(e) => sorter.setFilter("kind", e.target.value)}>
+          <option value="">Messages & announcements</option><option value="message">Messages</option><option value="announcement">Announcements</option></select>
+        <select aria-label="Reading" value={sorter.state.filters.state || ""} onChange={(e) => sorter.setFilter("state", e.target.value)}>
+          <option value="">Any</option><option value="open">Not everyone has read</option><option value="done">Read by everyone</option></select>
+        <select aria-label="Sort sent messages" value={sorter.state.sort} onChange={(e) => sorter.setSort(e.target.value)}>
+          <option value="-when">Newest first</option><option value="when">Oldest first</option><option value="read">Least read first</option>
+          <option value="subject">By subject</option></select>
+      </div>
       <div className="mail-list">
         {rows === null && <div className="skeleton" style={{ height: 180, margin: 12 }} />}
         {rows?.length === 0 && <p className="muted" style={{ padding: 16 }}>You haven’t sent anything yet.</p>}
-        {rows?.map((m) => {
+        {rows && rows.length > 0 && shown?.length === 0 && <p className="muted" style={{ padding: 16 }}>No sent messages match.</p>}
+        {shown?.map((m) => {
           const pct = m.recipient_count ? Math.round(((m.requires_ack ? m.ack_count : m.read_count) / m.recipient_count) * 100) : 0;
           return (
             <button key={m.id} className={`mail-item ${open?.id === m.id ? "active" : ""}`} onClick={() => setOpen(m)}>
@@ -225,6 +259,7 @@ function SentView() {
             </button>
           );
         })}
+      </div>
       </div>
       {open ? (
         <article className="mail-view">
@@ -426,15 +461,21 @@ function GroupsView({ ctx }: { ctx: Ctx }) {
   const [editing, setEditing] = useState<any | "new" | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => { api("/comms/groups/?page_size=200", { branch: null }).then((d) => setRows(d.results)).catch(() => setRows([])); }, [tick]);
+  const sorter = useListState({ sort: "name" });
+  const shown = rows && sorter.apply(rows, {
+    text: (g: any) => `${g.name} ${g.description} ${g.member_names.join(" ")} ${g.created_by_name}`,
+    sorts: { name: (g: any) => g.name, members: (g: any) => g.member_names.length, by: (g: any) => g.created_by_name } });
   return (
     <div>
       <div className="toolbar"><span className="muted">Groups are saved lists of people you message together, e.g. “Weekend shift”.</span>
+        <input type="search" placeholder="Search groups or members" aria-label="Search groups" value={sorter.typed} onChange={(e) => sorter.setTyped(e.target.value)} />
         <span className="spacer" /><button className="primary" onClick={() => setEditing("new")}><UsersRound size={16} />New group</button></div>
       {rows?.length === 0 && <p className="muted">No groups yet.</p>}
       {!!rows?.length && (
         <table className="grid-table clickable">
-          <thead><tr><th>Group</th><th>Members</th><th>Made by</th></tr></thead>
-          <tbody>{rows.map((g) => (
+          <thead><tr><SortHeader list={sorter} k="name">Group</SortHeader><SortHeader list={sorter} k="members">Members</SortHeader>
+            <SortHeader list={sorter} k="by">Made by</SortHeader></tr></thead>
+          <tbody>{(shown || []).map((g) => (
             <tr key={g.id} tabIndex={0} onClick={() => setEditing(g)} onKeyDown={(e) => e.key === "Enter" && setEditing(g)}>
               <td><b>{g.name}</b>{g.description && <div className="muted" style={{ fontSize: ".82rem" }}>{g.description}</div>}</td>
               <td>{g.member_names.slice(0, 4).join(", ")}{g.member_names.length > 4 && ` +${g.member_names.length - 4}`}</td>
